@@ -11,27 +11,24 @@ try:
 except:
     yf = None
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Macro Repression + Stress Monitor",
+    layout="wide"
+)
 
 # =========================
 # CONFIG
 # =========================
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
-SERIES = {
-    "DGS10": "10Y Yield",
-    "BAMLH0A0HYM2": "HY",
-    "BAMLC0A0CM": "IG",
-    "DFII10": "TIPS",
-    "T10YIE": "Breakeven",
-    "FEDFUNDS": "Fed Funds",
-    "CPIAUCSL": "CPI",
-    "M2SL": "M2"
-}
-
 TREASURY_THRESHOLD = 5
 CREDIT_THRESHOLD = 6
 KRE_DROP = -30
+
+TIPS_EARLY_WARNING = 1.5
+TIPS_REPRESSION_WARNING = 0.5
+BREAKEVEN_WARNING = 3
+M2_WARNING = 6
 
 # =========================
 # HELPERS
@@ -65,24 +62,30 @@ def yoy(df):
     return df.iloc[-1]["yoy"]
 
 # =========================
+# UI HELPERS (FIXED HTML)
+# =========================
+def card(title, value, sub, color="green"):
+    return f"""
+    <div style="background:#222;padding:20px;border-radius:15px;border:2px solid {color};">
+        <div style="font-size:14px;color:gray;">{title}</div>
+        <div style="font-size:32px;font-weight:bold;">{value}</div>
+        <div style="color:gray;">{sub}</div>
+    </div>
+    """
+
+# =========================
 # LOAD DATA
 # =========================
-try:
-    yield_df = get_fred("DGS10")
-    hy = get_fred("BAMLH0A0HYM2")
-    ig = get_fred("BAMLC0A0CM")
+yield_df = get_fred("DGS10")
+hy = get_fred("BAMLH0A0HYM2")
+ig = get_fred("BAMLC0A0CM")
+tips = get_fred("DFII10")
+breakeven = get_fred("T10YIE")
+fed = get_fred("FEDFUNDS")
+cpi = get_fred("CPIAUCSL")
+m2 = get_fred("M2SL")
 
-    tips = get_fred("DFII10")
-    breakeven = get_fred("T10YIE")
-    fed = get_fred("FEDFUNDS")
-    cpi = get_fred("CPIAUCSL")
-    m2 = get_fred("M2SL")
-
-    kre = get_kre()
-
-except Exception as e:
-    st.error(f"Data error: {e}")
-    st.stop()
+kre = get_kre()
 
 # =========================
 # DERIVED
@@ -130,62 +133,72 @@ if real_policy < 0:
 # =========================
 st.title("Macro Repression + Systemic Stress Monitor")
 
-tabs = st.tabs(["Summary", "Stress", "Repression"])
+tabs = st.tabs([
+    "Summary",
+    "Systemic Stress",
+    "Financial Repression",
+    "Data",
+    "Guide"
+])
 
 # =========================
 # SUMMARY
 # =========================
 with tabs[0]:
-    st.subheader("Macro Summary")
-
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("10Y Yield", f"{yield_val:.2f}%")
-    c2.metric("Credit Spread", f"{credit_val:.2f}%")
-    c3.metric("TIPS Real Yield", f"{tips_val:.2f}%")
-    c4.metric("Real Policy", f"{real_policy:.2f}%")
+    c1.markdown(card("10Y Yield", f"{yield_val:.2f}%", "", "#78be20"), unsafe_allow_html=True)
+    c2.markdown(card("Credit Spread", f"{credit_val:.2f}%", "", "#78be20"), unsafe_allow_html=True)
+    c3.markdown(card("TIPS Yield", f"{tips_val:.2f}%", "", "#78be20"), unsafe_allow_html=True)
+    c4.markdown(card("Real Policy", f"{real_policy:.2f}%", "", "#78be20"), unsafe_allow_html=True)
 
-    st.write(f"Repression Stage: **{stage}**")
+    st.write(f"### Repression Stage: {stage}")
 
 # =========================
 # STRESS
 # =========================
 with tabs[1]:
-    st.subheader("Systemic Stress")
-
     c1, c2, c3 = st.columns(3)
 
-    c1.metric("10Y Yield", f"{yield_val:.2f}%", "Stress" if treasury_signal else "Normal")
-    c2.metric("Credit Spread", f"{credit_val:.2f}%", "Stress" if credit_signal else "Normal")
-    c3.metric("KRE", f"${kre_price:.2f}", f"{kre_change:.1f}%")
-
-    if treasury_signal:
-        st.error("Treasury stress triggered")
-    if credit_signal:
-        st.error("Credit stress triggered")
-    if kre_signal:
-        st.error("Banking stress triggered")
+    c1.markdown(card("10Y Yield", f"{yield_val:.2f}%", "Stress" if treasury_signal else "Normal", "#ff6b6b" if treasury_signal else "#78be20"), unsafe_allow_html=True)
+    c2.markdown(card("Credit Spread", f"{credit_val:.2f}%", "Stress" if credit_signal else "Normal", "#ff6b6b" if credit_signal else "#78be20"), unsafe_allow_html=True)
+    c3.markdown(card("KRE", f"${kre_price:.2f}", f"{kre_change:.1f}%", "#ff6b6b" if kre_signal else "#78be20"), unsafe_allow_html=True)
 
 # =========================
 # REPRESSION
 # =========================
 with tabs[2]:
-    st.subheader("Financial Repression Monitor")
-
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("TIPS", f"{tips_val:.2f}%")
-    c2.metric("Breakeven", f"{breakeven_val:.2f}%")
-    c3.metric("Fed Funds", f"{fed_val:.2f}%")
-    c4.metric("Real Policy", f"{real_policy:.2f}%")
+    c1.markdown(card("TIPS", f"{tips_val:.2f}%", "", "#78be20"), unsafe_allow_html=True)
+    c2.markdown(card("Breakeven", f"{breakeven_val:.2f}%", "", "#78be20"), unsafe_allow_html=True)
+    c3.markdown(card("Fed Funds", f"{fed_val:.2f}%", "", "#78be20"), unsafe_allow_html=True)
+    c4.markdown(card("Real Policy", f"{real_policy:.2f}%", "", "#78be20"), unsafe_allow_html=True)
 
-    st.write(f"Stage: **{stage}**")
+    st.write(f"### Stage: {stage}")
 
+# =========================
+# DATA
+# =========================
+with tabs[3]:
+    df = pd.DataFrame({
+        "Metric": ["10Y Yield", "Credit Spread", "TIPS", "Breakeven", "Fed Funds", "CPI YoY", "M2 YoY"],
+        "Value": [yield_val, credit_val, tips_val, breakeven_val, fed_val, cpi_yoy, m2_yoy]
+    })
+    st.dataframe(df)
+
+# =========================
+# GUIDE
+# =========================
+with tabs[4]:
     st.markdown("""
-    ### Activation Sequence
-    - Fed shift
-    - Rate cuts
-    - TIPS falls
-    - Breakeven rises
-    - Real rates go negative
+    **Stress Signals**
+    - Yield > 5%
+    - Credit > 6%
+    - KRE -30%
+
+    **Repression Signals**
+    - TIPS → 0
+    - Breakeven > 3%
+    - Real rates negative
     """)
