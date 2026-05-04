@@ -191,14 +191,185 @@ with tabs[3]:
 # GUIDE
 # =========================
 with tabs[4]:
-    st.markdown("""
-    **Stress Signals**
-    - Yield > 5%
-    - Credit > 6%
-    - KRE -30%
+    st.subheader("Signal Guide")
 
-    **Repression Signals**
-    - TIPS → 0
-    - Breakeven > 3%
-    - Real rates negative
-    """)
+    st.markdown(
+        f"""
+        ## Systemic Stress Dashboard
+
+        ### 1. 10-Year Treasury Yield
+        **What it measures:**  
+        The market’s required return for lending to the U.S. government for 10 years.
+
+        **Why it matters:**  
+        A sustained move above **{TREASURY_THRESHOLD:.0f}%** can signal rising concern about debt sustainability, inflation, Treasury supply, or loss of confidence in fiscal management.
+
+        **Dashboard trigger:**  
+        - Warning if the 10-year Treasury yield rises above **{TREASURY_THRESHOLD:.0f}%**
+        - Stronger signal if it holds above that level for multiple trading days
+
+        ---
+
+        ### 2. Regional Bank ETF — KRE
+        **What it measures:**  
+        KRE tracks U.S. regional bank stocks.
+
+        **Why it matters:**  
+        Regional banks are a key part of credit creation. A major decline can suggest the market is pricing in deposit stress, loan losses, commercial real estate pressure, or institutional failures.
+
+        **Dashboard trigger:**  
+        - Warning if KRE falls **30% or more** from the selected baseline
+
+        ---
+
+        ### 3. High-Yield Minus Investment-Grade Credit Spread
+        **What it measures:**  
+        The difference between high-yield bond spreads and investment-grade corporate bond spreads.
+
+        **Why it matters:**  
+        When this spread widens sharply, credit markets are demanding much more compensation for risk. This often happens when defaults, liquidity stress, or recession risk are rising.
+
+        **Dashboard trigger:**  
+        - Warning if HY − IG spread reaches **{CREDIT_THRESHOLD:.0f}% or higher**
+
+        ---
+
+        ## Financial Repression Dashboard
+
+        ### 1. 10-Year TIPS Real Yield
+        **What it measures:**  
+        The inflation-adjusted yield on 10-year Treasury Inflation-Protected Securities.
+
+        **Why it matters:**  
+        This is the most important financial repression signal. Financial repression happens when real returns are suppressed below inflation. If the 10-year TIPS real yield trends toward zero or negative, it may indicate repression pressure.
+
+        **Dashboard trigger zones:**  
+        - Early warning: TIPS real yield below **{TIPS_EARLY_WARNING:.1f}%**
+        - Stronger repression warning: TIPS real yield below **{TIPS_REPRESSION_WARNING:.1f}%**
+
+        ---
+
+        ### 2. 10-Year Breakeven Inflation
+        **What it measures:**  
+        The market’s implied inflation expectation over the next 10 years.
+
+        **Why it matters:**  
+        Rising breakevens mean markets expect higher inflation. Financial repression becomes more likely if inflation expectations rise while nominal yields or policy rates are held down.
+
+        **Dashboard trigger:**  
+        - Warning if breakeven inflation rises above **{BREAKEVEN_WARNING:.0f}%**
+
+        ---
+
+        ### 3. Real Policy Rate
+        **Formula:**  
+        Fed Funds Rate − CPI YoY
+
+        **Why it matters:**  
+        If the Fed Funds Rate is below inflation, cash and short-term bonds lose purchasing power. This is one of the clearest signs of repression.
+
+        **Dashboard trigger:**  
+        - Warning if real policy rate falls below **0%**
+
+        ---
+
+        ### 4. CPI YoY
+        **What it measures:**  
+        Year-over-year consumer inflation.
+
+        **Why it matters:**  
+        CPI shows the inflation side of the repression equation. Higher CPI with low or falling rates means real returns are being compressed.
+
+        ---
+
+        ### 5. Fed Funds Rate
+        **What it measures:**  
+        The Federal Reserve’s main policy rate.
+
+        **Why it matters:**  
+        If the Fed cuts rates while inflation remains elevated, the real policy rate can quickly turn negative.
+
+        ---
+
+        ### 6. M2 Money Supply YoY
+        **What it measures:**  
+        Year-over-year growth in broad money supply.
+
+        **Why it matters:**  
+        Rising money supply can support liquidity, asset prices, and inflationary pressure. It is not repression by itself, but it can reinforce repression if real rates are negative.
+
+        **Dashboard trigger:**  
+        - Warning if M2 YoY growth rises above **{M2_WARNING:.0f}%**
+
+        ---
+
+        ## Activation Sequence to Watch
+
+        The dashboard is designed around this sequence:
+
+        1. **Fed leadership or policy shift**
+        2. **Aggressive rate-cut signals**
+        3. **10-year TIPS real yield trends toward zero**
+        4. **Breakeven inflation rises above 3%**
+        5. **Real policy rate turns negative**
+        6. **Financial repression becomes active**
+
+        ---
+
+        ## How to Interpret the Dashboard
+
+        ### Low Risk
+        - TIPS real yields remain positive
+        - Breakevens are contained
+        - Real policy rate is positive
+        - Credit spreads are calm
+        - KRE is stable
+
+        ### Elevated Risk
+        - TIPS real yield is falling
+        - Breakevens are rising
+        - CPI remains above policy rates
+        - M2 growth starts accelerating
+
+        ### High Risk
+        - TIPS real yield approaches zero
+        - Breakevens exceed 3%
+        - Real policy rate turns negative
+        - Credit spreads begin widening
+
+        ### Critical Risk
+        - Multiple stress signals trigger at once
+        - KRE falls sharply
+        - Credit spreads exceed 6%
+        - Real policy rate remains negative while inflation expectations rise
+
+        ---
+
+        ## Data Sources
+
+        - FRED `DGS10` — 10-year Treasury yield
+        - FRED `DFII10` — 10-year TIPS real yield
+        - FRED `T10YIE` — 10-year breakeven inflation
+        - FRED `FEDFUNDS` — Fed Funds rate
+        - FRED `CPIAUCSL` — Consumer Price Index
+        - FRED `M2SL` — M2 money supply
+        - FRED `BAMLH0A0HYM2` — High-yield corporate spread
+        - FRED `BAMLC0A0CM` — Investment-grade corporate spread
+        - Yahoo Finance `KRE` — Regional bank ETF
+
+        ---
+
+        ## Deployment Checklist
+
+        1. Save this file as `app.py`
+        2. Keep `requirements.txt` in the same folder
+        3. Add this to Streamlit Secrets:
+
+        ```toml
+        FRED_API_KEY = "your_real_key_here"
+        ```
+
+        4. Commit and push to GitHub
+        5. Reboot the Streamlit app
+        """
+    )
