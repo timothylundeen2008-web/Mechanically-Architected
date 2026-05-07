@@ -168,32 +168,55 @@ def make_gauge(score: int) -> go.Figure:
     return fig
 
 
-def make_history_chart(series: pd.Series, title: str, threshold: float,
+def make_history_chart(series: pd.Series, title: str, threshold: float | None,
                        threshold_label: str, color: str = "#4a8fd4",
                        fill: bool = False) -> go.Figure:
-    """Line chart with a horizontal threshold line."""
+    """
+    Line chart with an optional horizontal threshold line.
+    threshold=None skips the threshold line entirely (used for KRE price chart).
+    fill=True adds a subtle area fill under the line — fills to min value, not zero,
+    so price charts don't collapse the y-axis.
+    """
     fig = go.Figure()
 
+    vals = series.dropna().values
+    idx  = series.dropna().index
+
+    # Subtle fill under line — use "tonexty" against a transparent baseline
+    # so the y-axis stays anchored to the data range, not to zero
     if fill:
+        y_min = float(vals.min()) * 0.97   # baseline just below data
         fig.add_trace(go.Scatter(
-            x=series.index, y=series.values,
-            fill="tozeroy", fillcolor=f"rgba({_hex_to_rgb(color)},0.08)",
+            x=idx, y=[y_min] * len(idx),
+            line=dict(width=0), showlegend=False,
+            hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=idx, y=vals,
+            fill="tonexty",
+            fillcolor=f"rgba({_hex_to_rgb(color)},0.10)",
             line=dict(color=color, width=1.5),
             name=title, hovertemplate="%{y:.2f}<extra></extra>",
         ))
     else:
         fig.add_trace(go.Scatter(
-            x=series.index, y=series.values,
+            x=idx, y=vals,
             line=dict(color=color, width=1.5),
             name=title, hovertemplate="%{y:.2f}<extra></extra>",
         ))
 
-    fig.add_hline(
-        y=threshold,
-        line_dash="dot", line_color="#e05252", line_width=1.5,
-        annotation_text=f"  {threshold_label}",
-        annotation_font_color="#e05252", annotation_font_size=10,
-    )
+    # Only add threshold line when a real value is provided
+    if threshold is not None:
+        fig.add_hline(
+            y=threshold,
+            line_dash="dot", line_color="#e05252", line_width=1.5,
+            annotation_text=f"  {threshold_label}",
+            annotation_font_color="#e05252", annotation_font_size=10,
+        )
+
+    # Lock y-axis range to data — prevents threshold line from distorting scale
+    y_pad = (vals.max() - vals.min()) * 0.08 if len(vals) > 1 else 1
+    y_range = [vals.min() - y_pad, vals.max() + y_pad]
 
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
@@ -202,7 +225,7 @@ def make_history_chart(series: pd.Series, title: str, threshold: float,
         xaxis=dict(showgrid=False, tickfont=dict(color="#5c6475", size=10),
                    linecolor="#242830"),
         yaxis=dict(gridcolor="#1a1e25", tickfont=dict(color="#5c6475", size=10),
-                   linecolor="#242830"),
+                   linecolor="#242830", range=y_range),
         hovermode="x unified",
     )
     return fig
@@ -387,8 +410,13 @@ def main():
                     if threshold is not None:
                         fig = make_history_chart(series, title, threshold, t_label, clr)
                     else:
-                        # KRE — no threshold line
-                        fig = make_history_chart(series, title, -9999, "", clr, fill=True)
+                        # KRE price chart — compute -30% alert from 52-week high
+                        kre_52w = raw.get("kre_52w_high")
+                        kre_threshold = round(kre_52w * 0.70, 2) if kre_52w else None
+                        kre_label = f"−30% alert (${kre_threshold:.2f})" if kre_threshold else ""
+                        fig = make_history_chart(
+                            series, title, kre_threshold, kre_label, clr, fill=True
+                        )
                     st.plotly_chart(fig, use_container_width=True,
                                     config={"displayModeBar": False})
                 else:
