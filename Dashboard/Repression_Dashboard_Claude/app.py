@@ -30,7 +30,7 @@ st.set_page_config(
     page_title="Financial Repression Monitor",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ─── Custom CSS (dark theme matching original HTML) ─────────────────────────────
@@ -456,5 +456,255 @@ def main():
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  DIAGNOSE PAGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def diagnose_page():
+    """
+    Hidden debug page — shows exactly what yfinance returns on this server.
+    Accessible via the sidebar selector.
+    """
+    import inspect
+    import sys
+
+    st.markdown("## 🔬 Data Fetch Diagnostics")
+    st.markdown(
+        "This page tests every known yfinance fetch method and shows raw output. "
+        "Use it to identify which method works on this server."
+    )
+
+    # ── Environment info ───────────────────────────────────────────────────────
+    st.markdown("### Environment")
+    try:
+        import yfinance as yf
+        yf_ver = yf.__version__
+    except ImportError:
+        yf_ver = "NOT INSTALLED"
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Python", sys.version.split()[0])
+    col2.metric("yfinance", yf_ver)
+    col3.metric("pandas", pd.__version__)
+
+    st.markdown("---")
+
+    # ── Pick ticker to test ────────────────────────────────────────────────────
+    ticker = st.selectbox("Ticker to test", ["KRE", "^TNX", "SPY"], index=0)
+    period = st.selectbox("Period", ["5d", "1mo", "3mo", "1y", "5y"], index=0)
+
+    if st.button("▶ Run all fetch methods", type="primary"):
+
+        results = {}
+
+        # ── Method A: download(multi_level_index=False) ────────────────────────
+        with st.expander("Method A — yf.download(multi_level_index=False)", expanded=True):
+            try:
+                params = list(inspect.signature(yf.download).parameters.keys())
+                if "multi_level_index" not in params:
+                    st.warning("multi_level_index param not available in this yfinance version — skipping")
+                    results["A"] = None
+                else:
+                    df = yf.download(ticker, period=period, auto_adjust=True,
+                                     progress=False, multi_level_index=False)
+                    st.write(f"**Shape:** {df.shape}")
+                    st.write(f"**Columns:** `{df.columns.tolist()}`")
+                    st.write(f"**dtypes:**")
+                    st.dataframe(df.dtypes.to_frame("dtype"), use_container_width=False)
+                    st.write("**Head (3 rows):**")
+                    st.dataframe(df.head(3))
+
+                    if "Close" in df.columns:
+                        s = df["Close"]
+                        st.write(f"**df['Close'] type:** `{type(s).__name__}`")
+                        if isinstance(s, pd.Series) and len(s) > 0:
+                            st.success(f"✅ SUCCESS — latest Close: **{s.iloc[-1]:.4f}**")
+                            results["A"] = s
+                        elif isinstance(s, pd.DataFrame):
+                            st.error(f"❌ df['Close'] returned a DataFrame, not a Series — MultiIndex leak")
+                            st.dataframe(s.head(3))
+                            results["A"] = None
+                        else:
+                            st.error("❌ Empty or unusable Close column")
+                            results["A"] = None
+                    else:
+                        st.error(f"❌ No 'Close' column. All columns: `{df.columns.tolist()}`")
+                        results["A"] = None
+            except Exception as e:
+                st.error(f"❌ Exception: `{type(e).__name__}: {e}`")
+                results["A"] = None
+
+        # ── Method B: Ticker.history() ─────────────────────────────────────────
+        with st.expander("Method B — yf.Ticker().history(period=...)", expanded=True):
+            try:
+                t    = yf.Ticker(ticker)
+                hist = t.history(period=period, auto_adjust=True)
+                st.write(f"**Shape:** {hist.shape}")
+                st.write(f"**Columns:** `{hist.columns.tolist()}`")
+                st.write(f"**Index tz:** `{hist.index.tz}`")
+                st.write("**Head (3 rows):**")
+                st.dataframe(hist.head(3))
+
+                if "Close" in hist.columns and len(hist) > 0:
+                    val = hist["Close"].iloc[-1]
+                    st.success(f"✅ SUCCESS — latest Close: **{val:.4f}**")
+                    results["B"] = hist["Close"]
+                else:
+                    st.error("❌ No usable Close column")
+                    results["B"] = None
+            except Exception as e:
+                st.error(f"❌ Exception: `{type(e).__name__}: {e}`")
+                results["B"] = None
+
+        # ── Method C: Ticker.history(start=, end=) ────────────────────────────
+        with st.expander("Method C — yf.Ticker().history(start=..., end=...)", expanded=True):
+            try:
+                import datetime as dt
+                end_dt   = dt.date.today()
+                start_dt = end_dt - dt.timedelta(days=10)
+                t    = yf.Ticker(ticker)
+                hist = t.history(start=str(start_dt), end=str(end_dt))
+                st.write(f"**Shape:** {hist.shape}")
+                st.write(f"**Columns:** `{hist.columns.tolist()}`")
+                st.write("**Head (3 rows):**")
+                st.dataframe(hist.head(3))
+
+                if "Close" in hist.columns and len(hist) > 0:
+                    val = hist["Close"].iloc[-1]
+                    st.success(f"✅ SUCCESS — latest Close: **{val:.4f}**")
+                    results["C"] = hist["Close"]
+                else:
+                    st.error("❌ No usable Close column")
+                    results["C"] = None
+            except Exception as e:
+                st.error(f"❌ Exception: `{type(e).__name__}: {e}`")
+                results["C"] = None
+
+        # ── Method D: fast_info ────────────────────────────────────────────────
+        with st.expander("Method D — yf.Ticker().fast_info['last_price']", expanded=True):
+            try:
+                t     = yf.Ticker(ticker)
+                price = t.fast_info["last_price"]
+                st.write(f"**fast_info keys:** `{list(t.fast_info.keys())[:8]}`")
+                if price and price > 0:
+                    st.success(f"✅ SUCCESS — last_price: **{price:.4f}**")
+                    results["D"] = price
+                else:
+                    st.error(f"❌ Invalid price: {price}")
+                    results["D"] = None
+            except Exception as e:
+                st.error(f"❌ Exception: `{type(e).__name__}: {e}`")
+                results["D"] = None
+
+        # ── Method E: download() default with MultiIndex flatten ───────────────
+        with st.expander("Method E — yf.download() default + manual MultiIndex flatten", expanded=True):
+            try:
+                df = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+                st.write(f"**Shape:** {df.shape}")
+                st.write(f"**Column type:** `{type(df.columns).__name__}`")
+                st.write(f"**Columns:** `{df.columns.tolist()}`")
+                st.write("**Head (3 rows):**")
+                st.dataframe(df.head(3))
+
+                # Try all key formats
+                found = False
+                for key in [("Close", ticker), ("Close", ticker.replace("^", "")), "Close"]:
+                    if key in df.columns:
+                        s = df[key]
+                        if isinstance(s, pd.Series) and len(s) > 0:
+                            st.success(f"✅ SUCCESS via key `{key!r}` — latest: **{s.iloc[-1]:.4f}**")
+                            results["E"] = s
+                            found = True
+                            break
+
+                if not found:
+                    # Try MultiIndex level search
+                    if isinstance(df.columns, pd.MultiIndex):
+                        close_cols = [(a, b) for (a, b) in df.columns if a == "Close"]
+                        st.write(f"**MultiIndex 'Close' columns found:** `{close_cols}`")
+                        if close_cols:
+                            s = df[close_cols[0]]
+                            if isinstance(s, pd.Series) and len(s) > 0:
+                                st.success(f"✅ SUCCESS via MultiIndex search `{close_cols[0]}` — latest: **{s.iloc[-1]:.4f}**")
+                                results["E"] = s
+                                found = True
+
+                    if not found:
+                        st.error("❌ Could not extract Close from any key")
+                        results["E"] = None
+            except Exception as e:
+                st.error(f"❌ Exception: `{type(e).__name__}: {e}`")
+                results["E"] = None
+
+        # ── Summary ────────────────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### Summary")
+        working = [k for k, v in results.items() if v is not None]
+        failing = [k for k, v in results.items() if v is None]
+
+        if working:
+            st.success(f"✅ Working methods: **{', '.join(working)}**")
+            st.info(
+                f"👉 Paste this output in chat. The fix will hardcode Method "
+                f"**{working[0]}** as the primary fetch strategy in `data_fetcher.py`."
+            )
+        else:
+            st.error(
+                "❌ ALL methods failed. This likely means Yahoo Finance is being "
+                "blocked by the server (common on Streamlit Cloud). "
+                "Paste this output in chat — we'll switch KRE to an alternative source."
+            )
+
+        if failing:
+            st.warning(f"Failing methods: {', '.join(failing)}")
+
+    # ── FRED quick test ────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### FRED connection test")
+    if st.button("▶ Test FRED (DFII10 — TIPS real yield)"):
+        try:
+            import requests
+            url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                from io import StringIO
+                df = pd.read_csv(StringIO(resp.text), parse_dates=["DATE"], index_col="DATE")
+                df.columns = ["value"]
+                df["value"] = pd.to_numeric(df["value"], errors="coerce")
+                df = df.dropna()
+                latest_val = df["value"].iloc[-1]
+                latest_dt  = df.index[-1].date()
+                st.success(f"✅ FRED OK — DFII10 latest: **{latest_val:.2f}%** as of {latest_dt}")
+                st.line_chart(df.tail(252), use_container_width=True)
+            else:
+                st.error(f"❌ FRED returned HTTP {resp.status_code}")
+        except Exception as e:
+            st.error(f"❌ FRED connection failed: `{type(e).__name__}: {e}`")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ROUTING
+# ─────────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    main()
+    with st.sidebar:
+        st.markdown("### Navigation")
+        page = st.radio(
+            label="",
+            options=["📊 Dashboard", "🔬 Diagnostics"],
+            index=0,
+            label_visibility="collapsed",
+        )
+        st.markdown("---")
+        st.markdown(
+            "<div style='font-size:.72rem;color:#5c6475;line-height:1.6;'>"
+            "Data: FRED · Yahoo Finance<br>"
+            "Not investment advice."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    if page == "🔬 Diagnostics":
+        diagnose_page()
+    else:
+        main()
