@@ -493,6 +493,8 @@ def diagnose_page():
     ticker = st.selectbox("Ticker to test", ["KRE", "^TNX", "SPY"], index=0)
     period = st.selectbox("Period", ["5d", "1mo", "3mo", "1y", "5y"], index=0)
 
+    st.info("💡 **Tip:** Test with `5y` period too — the chart uses 5 years of history and the column structure sometimes differs from short periods.")
+
     if st.button("▶ Run all fetch methods", type="primary"):
 
         results = {}
@@ -657,6 +659,43 @@ def diagnose_page():
 
         if failing:
             st.warning(f"Failing methods: {', '.join(failing)}")
+
+    # ── 5Y period specific test ────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 5-year period test (used by the chart)")
+    st.markdown("The chart requests `period='5y'` — test that specifically:")
+    if st.button("▶ Test KRE with period='5y'"):
+        try:
+            df = yf.download(
+                "KRE", period="5y", auto_adjust=True,
+                progress=False, multi_level_index=False,
+            )
+            st.write(f"**Shape:** {df.shape}")
+            st.write(f"**Columns:** `{df.columns.tolist()}`")
+            st.write(f"**Column type:** `{type(df.columns).__name__}`")
+            st.write("**Head (3 rows):**")
+            st.dataframe(df.head(3))
+            st.write("**Tail (3 rows):**")
+            st.dataframe(df.tail(3))
+
+            if "Close" in df.columns:
+                s = df["Close"]
+                st.write(f"**df['Close'] type:** `{type(s).__name__}`")
+                st.write(f"**df['Close'] dtype:** `{s.dtype}`")
+                if isinstance(s, pd.Series) and len(s) > 0:
+                    st.success(f"✅ 5y fetch OK — {len(s)} rows, "
+                               f"range: {s.min():.2f} – {s.max():.2f}, "
+                               f"latest: {s.iloc[-1]:.2f}")
+                    st.line_chart(s, use_container_width=True)
+                elif isinstance(s, pd.DataFrame):
+                    st.error("❌ Close returned a DataFrame not a Series — MultiIndex leak despite multi_level_index=False")
+                    st.dataframe(s.head())
+                else:
+                    st.error("❌ Close empty or wrong type")
+            else:
+                st.error(f"❌ No 'Close' column. Got: `{df.columns.tolist()}`")
+        except Exception as e:
+            st.error(f"❌ Exception: `{type(e).__name__}: {e}`")
 
     # ── FRED quick test ────────────────────────────────────────────────────────
     st.markdown("---")
