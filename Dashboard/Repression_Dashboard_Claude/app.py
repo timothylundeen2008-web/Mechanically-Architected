@@ -1000,6 +1000,26 @@ def wealth_assets_tab(raw: dict):
         "of the last 50 years · Organized by repression phase"
         "</span>", unsafe_allow_html=True
     )
+
+    # ── Data status ────────────────────────────────────────────────────────────
+    WEALTH_TICKERS = ["SCHP","GLD","VYM","VNQ","XLE","VEA","FLOT","IBIT","TLT","QQQ","VT"]
+    loaded  = [t for t in WEALTH_TICKERS if len(raw.get(f"wealth_{t}_series", pd.Series(dtype=float))) > 0]
+    missing = [t for t in WEALTH_TICKERS if t not in loaded]
+
+    if missing:
+        with st.expander(f"⚠️ {len(missing)} ticker(s) not loaded: {', '.join(missing)} — click to see details"):
+            st.markdown(
+                f"**Loaded ({len(loaded)}):** {', '.join(loaded) if loaded else 'none'}\n\n"
+                f"**Missing ({len(missing)}):** {', '.join(missing)}\n\n"
+                "Missing tickers show 'Price unavailable' charts. "
+                "Click **🔄 Refresh data** in the sidebar to retry, or check the 🔬 Diagnostics page."
+            )
+            for t in missing:
+                s = raw.get(f"wealth_{t}_series", pd.Series(dtype=float))
+                st.write(f"  `{t}`: Series length = {len(s)}")
+    else:
+        st.success(f"✅ All {len(WEALTH_TICKERS)} asset tickers loaded successfully", icon=None)
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Current phase indicator ────────────────────────────────────────────────
@@ -1133,11 +1153,8 @@ def wealth_assets_tab(raw: dict):
             ccols = st.columns(min(3, len(chart_tickers)))
             for idx, (ticker, name, color) in enumerate(chart_tickers):
                 with ccols[idx % 3]:
-                    with st.spinner(f"Loading {ticker}…"):
-                        try:
-                            series = fetch_yf_series(ticker, period="2y")
-                        except Exception:
-                            series = pd.Series(dtype=float)
+                    # Read from pre-fetched raw dict — no spinner needed
+                    series = raw.get(f"wealth_{ticker}_series", pd.Series(dtype=float))
 
                     st.markdown(f"**{ticker}** — {name[:30]}")
                     if series is not None and len(series) > 10:

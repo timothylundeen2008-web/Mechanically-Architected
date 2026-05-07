@@ -285,6 +285,35 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     else:
         out["implied_breakeven"] = out.get("breakeven")
 
+    # ── 12. Wealth-building asset tickers (pre-fetched for Tab 5) ─────────────
+    # One primary ticker per asset — stored as "wealth_{TICKER}_series"
+    # Fetched here so the tab renders instantly without per-chart spinner delays.
+    WEALTH_TICKERS = [
+        # Before
+        "SCHP",   # TIPS ETF
+        "GLD",    # Gold
+        "VYM",    # Dividend equity
+        "VNQ",    # REITs
+        # During
+        "XLE",    # Energy
+        "VEA",    # Intl developed equity
+        "FLOT",   # Floating rate
+        "IBIT",   # Bitcoin ETF
+        # After
+        "TLT",    # Long Treasuries
+        "QQQ",    # Growth/Tech
+        "VT",     # Global equity
+    ]
+    print("\n[fetch] Wealth asset tickers ---")
+    for tkr in WEALTH_TICKERS:
+        key_name = f"wealth_{tkr}_series"
+        s = fetch_yf_series(tkr, period="2y")
+        out[key_name] = s
+        if len(s) > 0:
+            print(f"  {tkr:6s}: {len(s)} rows, latest={s.iloc[-1]:.2f}")
+        else:
+            print(f"  {tkr:6s}: EMPTY")
+
     # ── Final summary ──────────────────────────────────────────────────────────
     print("\n=== fetch_all_indicators complete ===")
     for k in ["treasury_10y", "tips_real_yield", "breakeven", "fed_funds",
