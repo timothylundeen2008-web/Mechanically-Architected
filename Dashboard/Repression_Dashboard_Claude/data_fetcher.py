@@ -314,6 +314,65 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
         else:
             print(f"  {tkr:6s}: EMPTY")
 
+    # ── 13. Fed H.4.1 Balance Sheet series (weekly, Thursday release) ──────────
+    # All series are Wednesday-level or week-average from FRED
+    print("\n[fetch] H.4.1 Balance Sheet ---")
+
+    # Total assets (WALCL) — the headline number, millions USD
+    walcl = fetch_fred("WALCL", key, "2019-01-01")
+    out["bs_total_assets"]        = walcl / 1e6   # convert to trillions
+    out["bs_total_assets_latest"] = latest(walcl / 1e6)
+
+    # US Treasury securities held outright (TREAST)
+    treast = fetch_fred("TREAST", key, "2019-01-01")
+    out["bs_treasuries"]        = treast / 1e6
+    out["bs_treasuries_latest"] = latest(treast / 1e6)
+
+    # Mortgage-backed securities held outright (WSHOMCB)
+    wshomcb = fetch_fred("WSHOMCB", key, "2019-01-01")
+    out["bs_mbs"]        = wshomcb / 1e6
+    out["bs_mbs_latest"] = latest(wshomcb / 1e6)
+
+    # Treasury General Account — TGA (WTREGEN), millions USD
+    wtregen = fetch_fred("WTREGEN", key, "2019-01-01")
+    out["bs_tga"]        = wtregen / 1e3   # convert millions → billions
+    out["bs_tga_latest"] = latest(wtregen / 1e3)
+
+    # Reserve balances held at Fed (WRESBAL), millions USD
+    wresbal = fetch_fred("WRESBAL", key, "2019-01-01")
+    out["bs_reserves"]        = wresbal / 1e3   # millions → billions
+    out["bs_reserves_latest"] = latest(wresbal / 1e3)
+
+    # Overnight reverse repos (ON RRP) — RRPONTSYD, billions USD
+    rrp = fetch_fred("RRPONTSYD", key, "2019-01-01")
+    out["bs_rrp"]        = rrp
+    out["bs_rrp_latest"] = latest(rrp)
+
+    # Week-over-week change in total assets
+    if len(walcl) >= 2:
+        walcl_clean = walcl.dropna()
+        out["bs_wow_change_bn"] = round(
+            (walcl_clean.iloc[-1] - walcl_clean.iloc[-2]) / 1e3, 1
+        )  # billions
+    else:
+        out["bs_wow_change_bn"] = None
+
+    # Peak (QT max) for drawdown calc — peak was ~$8.97T in April 2022
+    bs_peak = 8965.8  # billions
+    out["bs_peak_bn"] = bs_peak
+    if out["bs_total_assets_latest"] is not None:
+        out["bs_drawdown_pct"] = round(
+            (bs_peak - out["bs_total_assets_latest"] * 1000) / bs_peak * 100, 1
+        )
+    else:
+        out["bs_drawdown_pct"] = None
+
+    for k in ["bs_total_assets_latest", "bs_treasuries_latest", "bs_mbs_latest",
+              "bs_tga_latest", "bs_reserves_latest", "bs_rrp_latest",
+              "bs_wow_change_bn", "bs_drawdown_pct"]:
+        v = out.get(k)
+        print(f"  {k:30s}: {f'{v:.2f}' if isinstance(v, float) else v}")
+
     # ── Final summary ──────────────────────────────────────────────────────────
     print("\n=== fetch_all_indicators complete ===")
     for k in ["treasury_10y", "tips_real_yield", "breakeven", "fed_funds",

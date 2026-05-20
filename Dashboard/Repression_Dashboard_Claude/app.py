@@ -352,8 +352,8 @@ def main():
     st.markdown("---")
 
     # ── Tabs: Scorecard | Charts | Timeline | Watchlist ───────────────────────
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📋 Indicator Scorecard", "📈 Historical Charts", "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Wealth-Building Assets"]
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["📋 Indicator Scorecard", "📈 Historical Charts", "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Wealth-Building Assets", "🏦 Fed Balance Sheet (H.4.1)"]
     )
 
     # ── TAB 1: SCORECARD ──────────────────────────────────────────────────────
@@ -474,6 +474,10 @@ def main():
     with tab5:
         wealth_assets_tab(raw)
 
+    # ── TAB 6: FED BALANCE SHEET ───────────────────────────────────────────────
+    with tab6:
+        fed_balance_sheet_tab(raw)
+
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown(
@@ -483,6 +487,536 @@ def main():
         "ICE BofA Bond Indices (via FRED) · NY Fed ACM Term Premium Model.<br>"
         "<b>Disclaimer:</b> Educational research only — not investment advice. "
         "Past performance does not guarantee future results."
+        "</div>",
+        unsafe_allow_html=True
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FED BALANCE SHEET (H.4.1) TAB
+# ─────────────────────────────────────────────────────────────────────────────
+
+def fed_balance_sheet_tab(raw: dict):
+    """
+    Renders the Fed H.4.1 Balance Sheet weekly tracker tab.
+    Data sourced from FRED — updated every Thursday at 4:30 PM ET.
+    """
+
+    st.markdown("""
+    <style>
+      .bs-kpi {
+        background: #13161b; border: 1px solid #242830; border-radius: 10px;
+        padding: .9rem 1rem; text-align: center;
+      }
+      .bs-kpi-val   { font-size: 1.55rem; font-weight: 700; font-family: monospace; }
+      .bs-kpi-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
+                      color: #5c6475; margin-top: 3px; }
+      .bs-kpi-sub   { font-size: .72rem; color: #5c6475; margin-top: 2px; }
+
+      .bs-card {
+        background: #13161b; border: 1px solid #242830; border-radius: 10px;
+        padding: 1rem 1.1rem; margin-bottom: 10px; border-left: 3px solid;
+      }
+      .bs-card-title { font-size: .92rem; font-weight: 600; color: #e8eaf0; margin-bottom: 3px; }
+      .bs-card-val   { font-size: 1.3rem; font-weight: 700; font-family: monospace; margin-bottom: 4px; }
+      .bs-card-sub   { font-size: .75rem; color: #9aa3b2; line-height: 1.5; margin-bottom: 6px; }
+      .bs-card-why   { font-size: .78rem; color: #5c6475; line-height: 1.5; border-top: 1px solid #1a1e25;
+                       padding-top: 7px; margin-top: 4px; }
+
+      .timeline-entry {
+        display: flex; gap: 12px; padding-bottom: 14px; position: relative;
+      }
+      .timeline-entry:not(:last-child)::before {
+        content: ''; position: absolute; left: 10px; top: 22px; bottom: 0;
+        width: 1px; background: #242830;
+      }
+      .tl-dot-bs {
+        width: 21px; height: 21px; border-radius: 50%; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 9px; font-weight: 700; margin-top: 1px;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Header ─────────────────────────────────────────────────────────────────
+    st.markdown('<p class="sec-label">Federal Reserve H.4.1 · Balance Sheet Weekly Tracker</p>',
+                unsafe_allow_html=True)
+
+    import datetime as dt
+    today      = dt.date.today()
+    last_thurs = today - dt.timedelta(days=(today.weekday() - 3) % 7)
+    next_thurs = last_thurs + dt.timedelta(days=7)
+
+    st.markdown(
+        f"<span style='color:#9aa3b2;font-size:.85rem;'>"
+        f"Released every Thursday at 4:30 PM ET · "
+        f"Last release: <b style='color:#e8eaf0;'>{last_thurs.strftime('%B %d, %Y')}</b> · "
+        f"Next release: <b style='color:#e8eaf0;'>{next_thurs.strftime('%B %d, %Y')}</b>"
+        f"</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<span style='font-size:.78rem;color:#5c6475;'>"
+        "Source: FRED — WALCL, TREAST, WSHOMCB, WTREGEN, WRESBAL, RRPONTSYD · "
+        "<a href='https://www.federalreserve.gov/releases/h41/current/' "
+        "style='color:#4a8fd4;'>View latest H.4.1 release →</a>"
+        "</span>",
+        unsafe_allow_html=True
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Pull values ─────────────────────────────────────────────────────────────
+    total_assets = raw.get("bs_total_assets_latest")   # trillions
+    treasuries   = raw.get("bs_treasuries_latest")     # trillions
+    mbs          = raw.get("bs_mbs_latest")            # trillions
+    tga          = raw.get("bs_tga_latest")            # billions
+    reserves     = raw.get("bs_reserves_latest")       # billions
+    rrp          = raw.get("bs_rrp_latest")            # billions
+    wow_change   = raw.get("bs_wow_change_bn")         # billions WoW change
+    drawdown     = raw.get("bs_drawdown_pct")          # % from peak
+
+    def fmt_T(v):
+        return f"${v:.2f}T" if v is not None else "N/A"
+    def fmt_B(v):
+        return f"${v:,.0f}B" if v is not None else "N/A"
+    def fmt_wow(v):
+        if v is None: return "N/A"
+        sign = "+" if v >= 0 else ""
+        clr  = "#5a9e47" if v >= 0 else "#e05252"
+        return sign, v, clr
+
+    # QT vs QE signal
+    if wow_change is not None:
+        if wow_change >= 10:
+            bs_signal, bs_signal_clr = "QE EXPANDING ⚠", "#e05252"
+        elif wow_change >= 0:
+            bs_signal, bs_signal_clr = "Flat / Slight Expansion", "#d4913a"
+        else:
+            bs_signal, bs_signal_clr = "QT SHRINKING ✓", "#5a9e47"
+    else:
+        bs_signal, bs_signal_clr = "N/A", "#5c6475"
+
+    # ── Top KPI row ─────────────────────────────────────────────────────────────
+    k1, k2, k3, k4, k5 = st.columns(5)
+
+    with k1:
+        wow_sign = "+" if (wow_change or 0) >= 0 else ""
+        wow_clr  = "#5a9e47" if (wow_change or 0) <= 0 else "#e05252"
+        wow_str  = f"{wow_sign}{wow_change:.1f}B WoW" if wow_change is not None else "N/A"
+        st.markdown(
+            f'<div class="bs-kpi">'
+            f'<div class="bs-kpi-val" style="color:#4a8fd4;">{fmt_T(total_assets)}</div>'
+            f'<div class="bs-kpi-label">Total Assets</div>'
+            f'<div class="bs-kpi-sub" style="color:{wow_clr};">{wow_str}</div>'
+            f'</div>', unsafe_allow_html=True
+        )
+    with k2:
+        st.markdown(
+            f'<div class="bs-kpi">'
+            f'<div class="bs-kpi-val" style="color:#d4913a;">{fmt_T(treasuries)}</div>'
+            f'<div class="bs-kpi-label">Treasuries Held</div>'
+            f'<div class="bs-kpi-sub">TREAST</div>'
+            f'</div>', unsafe_allow_html=True
+        )
+    with k3:
+        st.markdown(
+            f'<div class="bs-kpi">'
+            f'<div class="bs-kpi-val" style="color:#c76bdb;">{fmt_T(mbs)}</div>'
+            f'<div class="bs-kpi-label">MBS Held</div>'
+            f'<div class="bs-kpi-sub">WSHOMCB</div>'
+            f'</div>', unsafe_allow_html=True
+        )
+    with k4:
+        st.markdown(
+            f'<div class="bs-kpi">'
+            f'<div class="bs-kpi-val" style="color:#5a9e47;">{fmt_B(reserves)}</div>'
+            f'<div class="bs-kpi-label">Bank Reserves</div>'
+            f'<div class="bs-kpi-sub">WRESBAL</div>'
+            f'</div>', unsafe_allow_html=True
+        )
+    with k5:
+        dd_clr = "#5a9e47" if (drawdown or 0) > 5 else "#d4913a"
+        st.markdown(
+            f'<div class="bs-kpi">'
+            f'<div class="bs-kpi-val" style="color:{dd_clr};">−{drawdown:.1f}%</div>'
+            f'<div class="bs-kpi-label">From Peak ($8.97T)</div>'
+            f'<div class="bs-kpi-sub">QT progress</div>'
+            f'</div>' if drawdown is not None else
+            f'<div class="bs-kpi"><div class="bs-kpi-val">N/A</div>'
+            f'<div class="bs-kpi-label">From Peak</div></div>',
+            unsafe_allow_html=True
+        )
+
+    # ── QE/QT Signal banner ─────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="background:#13161b;border:1px solid #242830;'
+        f'border-left:4px solid {bs_signal_clr};border-radius:10px;'
+        f'padding:.85rem 1.25rem;margin-bottom:1rem;">'
+        f'<span style="font-size:.88rem;font-weight:700;color:{bs_signal_clr};">'
+        f'Current Fed posture: {bs_signal}</span>'
+        f'<span style="font-size:.78rem;color:#9aa3b2;margin-left:16px;">'
+        f'WoW change: {fmt_B(wow_change) if wow_change is not None else "N/A"} | '
+        f'TGA: {fmt_B(tga)} | ON RRP: {fmt_B(rrp)}'
+        f'</span></div>',
+        unsafe_allow_html=True
+    )
+
+    # ── Charts: Total Assets + Components ──────────────────────────────────────
+    st.markdown('<p class="sec-label">Balance sheet history — 5 years</p>',
+                unsafe_allow_html=True)
+
+    chart_tab1, chart_tab2, chart_tab3 = st.tabs(
+        ["📊 Total Assets", "🏛️ Holdings Breakdown", "💧 Liquidity Indicators"]
+    )
+
+    with chart_tab1:
+        walcl_s = raw.get("bs_total_assets")
+        if walcl_s is not None and len(walcl_s) > 0:
+            vals = walcl_s.dropna().values
+            idx  = walcl_s.dropna().index
+            y_pad = (vals.max() - vals.min()) * 0.05
+
+            fig = go.Figure()
+            # Filled area
+            fig.add_trace(go.Scatter(
+                x=idx, y=[vals.min() - y_pad] * len(idx),
+                line=dict(width=0), showlegend=False, hoverinfo="skip",
+            ))
+            fig.add_trace(go.Scatter(
+                x=idx, y=vals,
+                fill="tonexty",
+                fillcolor="rgba(74,143,212,0.10)",
+                line=dict(color="#4a8fd4", width=2),
+                name="Total Assets (T)",
+                hovertemplate="$%{y:.3f}T<extra>Total Assets</extra>",
+            ))
+            # Peak annotation
+            fig.add_hline(
+                y=8.965, line_dash="dot", line_color="#e05252", line_width=1.2,
+                annotation_text="  Peak $8.97T (Apr 2022)",
+                annotation_font_color="#e05252", annotation_font_size=10,
+            )
+            # Pre-COVID baseline
+            fig.add_hline(
+                y=4.17, line_dash="dot", line_color="#5c6475", line_width=1,
+                annotation_text="  Pre-COVID baseline ~$4.2T",
+                annotation_font_color="#5c6475", annotation_font_size=9,
+            )
+            fig.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=320, showlegend=False,
+                margin=dict(t=20, b=40, l=60, r=30),
+                xaxis=dict(showgrid=False, tickfont=dict(color="#5c6475", size=10),
+                           linecolor="#242830"),
+                yaxis=dict(gridcolor="#1a1e25", tickfont=dict(color="#5c6475", size=10),
+                           linecolor="#242830",
+                           range=[vals.min() - y_pad, vals.max() + y_pad],
+                           tickprefix="$", ticksuffix="T"),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+            # WoW change bar chart (last 52 weeks)
+            if len(walcl_s) >= 2:
+                wk_changes = walcl_s.diff().dropna().tail(52) * 1000  # trillions → billions
+                colors_bar = ["#e05252" if v >= 0 else "#5a9e47" for v in wk_changes.values]
+                fig2 = go.Figure(go.Bar(
+                    x=wk_changes.index, y=wk_changes.values,
+                    marker_color=colors_bar,
+                    hovertemplate="%{y:+.1f}B WoW<extra></extra>",
+                ))
+                fig2.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    height=160, showlegend=False, title="Weekly Change ($B) — last 52 weeks",
+                    title_font=dict(size=12, color="#9aa3b2"),
+                    margin=dict(t=30, b=30, l=60, r=20),
+                    xaxis=dict(showgrid=False, tickfont=dict(color="#5c6475", size=9),
+                               linecolor="#242830"),
+                    yaxis=dict(gridcolor="#1a1e25", tickfont=dict(color="#5c6475", size=9),
+                               linecolor="#242830", ticksuffix="B"),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.warning("Total assets data unavailable — check FRED connection.")
+
+    with chart_tab2:
+        c1, c2 = st.columns(2)
+        for col, key_name, label, color, unit in [
+            (c1, "bs_treasuries", "Treasury Securities Held ($T)", "#d4913a", "T"),
+            (c2, "bs_mbs",        "MBS Held ($T)",                 "#c76bdb", "T"),
+        ]:
+            with col:
+                s = raw.get(key_name)
+                st.markdown(f"**{label}**")
+                if s is not None and len(s) > 0:
+                    vals = s.dropna().values
+                    idx  = s.dropna().index
+                    y_pad = (vals.max() - vals.min()) * 0.05
+                    fig = go.Figure(go.Scatter(
+                        x=idx, y=vals, line=dict(color=color, width=1.8),
+                        hovertemplate=f"$%{{y:.3f}}{unit}<extra></extra>",
+                    ))
+                    fig.update_layout(
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        height=220, showlegend=False,
+                        margin=dict(t=5, b=30, l=50, r=15),
+                        xaxis=dict(showgrid=False, tickfont=dict(color="#5c6475", size=9),
+                                   linecolor="#242830"),
+                        yaxis=dict(gridcolor="#1a1e25", tickfont=dict(color="#5c6475", size=9),
+                                   linecolor="#242830",
+                                   range=[vals.min() - y_pad, vals.max() + y_pad],
+                                   tickprefix="$", ticksuffix=unit),
+                        hovermode="x unified",
+                    )
+                    st.plotly_chart(fig, use_container_width=True,
+                                    config={"displayModeBar": False})
+                else:
+                    st.info("Data unavailable")
+
+    with chart_tab3:
+        c1, c2, c3 = st.columns(3)
+        liquidity_series = [
+            (c1, "bs_reserves", "Bank Reserves ($B)",         "#5a9e47", "B"),
+            (c2, "bs_tga",      "Treasury Gen. Account ($B)", "#d4913a", "B"),
+            (c3, "bs_rrp",      "Overnight RRP ($B)",         "#4a8fd4", "B"),
+        ]
+        for col, key_name, label, color, unit in liquidity_series:
+            with col:
+                s = raw.get(key_name)
+                st.markdown(f"**{label}**")
+                if s is not None and len(s) > 0:
+                    vals = s.dropna().values
+                    idx  = s.dropna().index
+                    y_pad = max((vals.max() - vals.min()) * 0.05, 10)
+                    fig = go.Figure(go.Scatter(
+                        x=idx, y=vals, line=dict(color=color, width=1.6),
+                        hovertemplate=f"$%{{y:,.0f}}{unit}<extra></extra>",
+                    ))
+                    fig.update_layout(
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        height=210, showlegend=False,
+                        margin=dict(t=5, b=25, l=50, r=10),
+                        xaxis=dict(showgrid=False, tickfont=dict(color="#5c6475", size=9),
+                                   linecolor="#242830"),
+                        yaxis=dict(gridcolor="#1a1e25", tickfont=dict(color="#5c6475", size=9),
+                                   linecolor="#242830",
+                                   range=[max(0, vals.min() - y_pad), vals.max() + y_pad],
+                                   tickprefix="$", ticksuffix=unit),
+                        hovermode="x unified",
+                    )
+                    st.plotly_chart(fig, use_container_width=True,
+                                    config={"displayModeBar": False})
+                    # Latest value badge
+                    lv = float(vals[-1])
+                    chg = float(vals[-1] - vals[-2]) if len(vals) >= 2 else None
+                    chg_str = (f"{'▲' if chg >= 0 else '▼'} {abs(chg):,.0f}B WoW"
+                               if chg is not None else "")
+                    chg_clr = "#5a9e47" if (chg or 0) <= 0 else "#e05252"
+                    if key_name == "bs_reserves":
+                        chg_clr = "#5a9e47" if (chg or 0) >= 0 else "#e05252"
+                    st.markdown(
+                        f'<div style="text-align:center;font-size:.75rem;margin-top:-8px;">'
+                        f'<b style="color:#e8eaf0;">${lv:,.0f}B</b> '
+                        f'<span style="color:{chg_clr};">{chg_str}</span></div>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.info("Data unavailable")
+
+    # ── Component detail cards ──────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<p class="sec-label">What each component signals for financial repression</p>',
+                unsafe_allow_html=True)
+
+    COMPONENTS = [
+        {
+            "title":  "Total Assets (WALCL)",
+            "value":  fmt_T(total_assets),
+            "series": "WALCL",
+            "color":  "#4a8fd4",
+            "sub":    f"Peak: $8.97T (Apr 2022) · QT drawdown: {drawdown:.1f}%" if drawdown else "Weekly Wednesday level",
+            "why": (
+                "The headline balance sheet number. Expanding = QE/monetary stimulus being injected. "
+                "Shrinking = QT (quantitative tightening) draining liquidity. "
+                "During financial repression, the Fed typically resumes balance sheet expansion "
+                "to suppress long-term yields — watch for the trough and any reversal. "
+                "The pre-COVID baseline was $4.2T. Peak QE reached $8.97T in April 2022."
+            ),
+        },
+        {
+            "title":  "Treasury Securities Held (TREAST)",
+            "value":  fmt_T(treasuries),
+            "series": "TREAST",
+            "color":  "#d4913a",
+            "sub":    "Direct suppression of Treasury yields",
+            "why": (
+                "When the Fed buys Treasuries, it artificially suppresses yields below what "
+                "the free market would demand — the operational definition of financial repression. "
+                "A resumption of Treasury purchases after QT ends is the most direct repression signal. "
+                "Watch for: QT pause announcement, then renewed Treasury buying. "
+                "Each $1T in purchases suppresses 10-yr yields by roughly 15-20 bps (Fed research)."
+            ),
+        },
+        {
+            "title":  "Mortgage-Backed Securities (WSHOMCB)",
+            "value":  fmt_T(mbs),
+            "series": "WSHOMCB",
+            "color":  "#c76bdb",
+            "sub":    "Housing market yield suppression",
+            "why": (
+                "MBS holdings suppress mortgage rates below market-clearing levels, "
+                "stimulating the housing market and supporting real estate prices. "
+                "During repression, MBS buying keeps 30-yr mortgage rates artificially low, "
+                "amplifying the real estate wealth effect. The Fed has been allowing MBS to "
+                "roll off during QT — any resumption of MBS buying signals deep repression."
+            ),
+        },
+        {
+            "title":  "Bank Reserves (WRESBAL)",
+            "value":  fmt_B(reserves),
+            "series": "WRESBAL",
+            "color":  "#5a9e47",
+            "sub":    "System liquidity buffer — watch for shortage signals",
+            "why": (
+                "Bank reserves are the buffer that prevents a repo market seizure (like Sept 2019). "
+                "When reserves fall too low (below ~$3T), money market rates spike and the Fed "
+                "is forced to inject liquidity. Low reserves = stress approaching. "
+                "High reserves = ample liquidity, suppressed short rates. "
+                "Current reading vs. the ~$3T 'comfortable minimum' is a key stability signal."
+            ),
+        },
+        {
+            "title":  "Treasury General Account — TGA (WTREGEN)",
+            "value":  fmt_B(tga),
+            "series": "WTREGEN",
+            "color":  "#d4913a",
+            "sub":    "Treasury's checking account at the Fed",
+            "why": (
+                "The TGA is the US Treasury's operating account. When the TGA is drawn down "
+                "(spent), that money flows into bank reserves, injecting liquidity into the system — "
+                "functionally similar to QE. When the TGA is rebuilt (debt ceiling lifted), it "
+                "drains reserves, tightening financial conditions. "
+                "A TGA rebuild after a debt ceiling resolution can tighten conditions by $500B+."
+            ),
+        },
+        {
+            "title":  "Overnight Reverse Repo — ON RRP (RRPONTSYD)",
+            "value":  fmt_B(rrp),
+            "series": "RRPONTSYD",
+            "color":  "#4a8fd4",
+            "sub":    "Excess liquidity parked at the Fed",
+            "why": (
+                "The RRP facility is where money market funds park excess cash overnight. "
+                "Peak RRP ($2.55T in Dec 2022) signaled extreme liquidity — too much money "
+                "chasing too few safe assets. As RRP drains toward zero, that liquidity "
+                "enters the banking system. RRP near zero = liquidity fully deployed, "
+                "reserves under pressure. Watch for RRP exhaustion as a liquidity cliff signal."
+            ),
+        },
+    ]
+
+    comp_cols = st.columns(2)
+    for i, comp in enumerate(COMPONENTS):
+        with comp_cols[i % 2]:
+            st.markdown(
+                f'<div class="bs-card" style="border-left-color:{comp["color"]};">'
+                f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+                f'flex-wrap:wrap;gap:6px;margin-bottom:4px;">'
+                f'  <div class="bs-card-title">{comp["title"]}</div>'
+                f'  <div class="bs-card-val" style="color:{comp["color"]};">{comp["value"]}</div>'
+                f'</div>'
+                f'<div class="bs-card-sub">'
+                f'  FRED: <code style="color:#5c6475;">{comp["series"]}</code> · {comp["sub"]}'
+                f'</div>'
+                f'<div class="bs-card-why">{comp["why"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+    # ── Historical context timeline ─────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<p class="sec-label">Historical QE/QT cycle context</p>',
+                unsafe_allow_html=True)
+
+    HISTORY = [
+        ("#5c6475", "Pre-GFC baseline (2007)",
+         "Balance sheet ~$900B. Normal monetary operations. No financial repression via balance sheet."),
+        ("#d4913a", "QE1 → QE3 (2008–2014)",
+         "Balance sheet expanded from $900B to $4.5T. First systematic balance sheet repression. "
+         "10-yr yield suppressed from 4%+ to sub-2%. Savers received negative real returns for 6 years."),
+        ("#5a9e47", "QT1 (2017–2019)",
+         "Balance sheet reduced from $4.5T to $3.8T before a repo market seizure in Sept 2019 "
+         "forced the Fed to restart liquidity injections. Revealed the ~$3T reserve floor."),
+        ("#e05252", "COVID QE (2020–2022)",
+         "Balance sheet doubled from $4.2T to $8.97T in 24 months. "
+         "Largest monetary expansion in Fed history. 10-yr yield suppressed to 0.55%."),
+        ("#d4913a", "QT2 (2022–present)",
+         "Balance sheet shrinking from $8.97T peak. ~$2T+ removed via passive roll-off. "
+         "Process expected to pause when reserves approach ~$3T floor."),
+        ("#e05252", "QT Pause → QE3? (2026+, scenario)",
+         "New Fed chair (May 2026) expected to pause QT and potentially restart Treasury purchases "
+         "to suppress yields — the operational activation of financial repression. "
+         "Watch WALCL for a trough followed by resumption of balance sheet expansion."),
+    ]
+
+    for dot_clr, title, desc in HISTORY:
+        st.markdown(
+            f'<div class="timeline-entry">'
+            f'<div class="tl-dot-bs" style="background:{dot_clr}22;border:1.5px solid {dot_clr};'
+            f'color:{dot_clr};">●</div>'
+            f'<div>'
+            f'<div style="font-size:.88rem;font-weight:600;color:#e8eaf0;margin-bottom:2px;">{title}</div>'
+            f'<div style="font-size:.78rem;color:#9aa3b2;line-height:1.5;">{desc}</div>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
+
+    # ── Repression signal thresholds ────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown('<p class="sec-label">Repression signal thresholds — what to watch</p>',
+                unsafe_allow_html=True)
+
+    thresholds = [
+        ("Total assets begin rising WoW for 3+ consecutive weeks",
+         "QE restart — direct balance sheet repression activated",
+         "#e05252"),
+        ("Treasury holdings stop declining (QT pause)",
+         "Precursor to QE — Fed has stopped allowing roll-off; yield suppression about to resume",
+         "#d4913a"),
+        ("Bank reserves fall below $3.0T",
+         "System approaching liquidity floor — Fed will be forced to inject; likely precedes QE restart",
+         "#d4913a"),
+        ("ON RRP facility reaches zero",
+         "All excess liquidity fully deployed — reserves now the only buffer; system fragility increasing",
+         "#e05252"),
+        ("TGA rebuilt above $800B after debt ceiling resolution",
+         "Massive reserve drain incoming — equivalent to passive QT of $500B+; watch for market stress",
+         "#d4913a"),
+        ("MBS purchases restart after being zero for 12+ months",
+         "Deep repression signal — Fed explicitly subsidizing housing and suppressing mortgage rates",
+         "#e05252"),
+    ]
+
+    for trigger, meaning, clr in thresholds:
+        st.markdown(
+            f'<div style="background:#13161b;border:1px solid #242830;border-left:3px solid {clr};'
+            f'border-radius:8px;padding:.65rem 1rem;margin-bottom:6px;display:flex;gap:12px;">'
+            f'<div style="flex:1;">'
+            f'  <div style="font-size:.8rem;font-weight:600;color:#e8eaf0;margin-bottom:2px;">'
+            f'  {trigger}</div>'
+            f'  <div style="font-size:.75rem;color:#9aa3b2;">{meaning}</div>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
+
+    st.markdown(
+        "<div style='font-size:.72rem;color:#5c6475;margin-top:12px;line-height:1.6;'>"
+        "<b>Data sources:</b> All series from FRED (Federal Reserve Bank of St. Louis). "
+        "WALCL updated weekly (Wednesday level, released Thursday 4:30 PM ET). "
+        "TREAST, WSHOMCB, WRESBAL, WTREGEN, RRPONTSYD all from H.4.1 release. "
+        "Balance sheet values in trillions (total assets, holdings) or billions (liquidity). "
         "</div>",
         unsafe_allow_html=True
     )
