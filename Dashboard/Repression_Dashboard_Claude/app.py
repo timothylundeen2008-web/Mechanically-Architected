@@ -273,9 +273,17 @@ def main():
     TTL = 3600  # seconds
 
     now = time.time()
-    if refresh or cache_key not in st.session_state or \
+
+    # Invalidate cache if it's missing H.4.1 balance sheet keys
+    # (happens when app was deployed before that fetch block was added)
+    cached_raw = st.session_state.get(cache_key, {})
+    bs_missing = "bs_total_assets_latest" not in cached_raw
+
+    if refresh or cache_key not in st.session_state or bs_missing or \
        (now - st.session_state.get(cache_ts, 0)) > TTL:
-        with st.spinner("Fetching live data from FRED & Yahoo Finance…"):
+        reason = ("missing H.4.1 keys" if bs_missing else
+                  "manual refresh"     if refresh    else "TTL expired / first load")
+        with st.spinner(f"Fetching live data from FRED & Yahoo Finance… ({reason})"):
             try:
                 raw = fetch_all_indicators(fred_api_key=fred_key)
                 st.session_state[cache_key] = raw
@@ -501,6 +509,7 @@ def fed_balance_sheet_tab(raw: dict):
     Renders the Fed H.4.1 Balance Sheet weekly tracker tab.
     Data sourced from FRED — updated every Thursday at 4:30 PM ET.
     """
+    from data_fetcher import fetch_fred, latest
 
     st.markdown("""
     <style>
@@ -563,6 +572,103 @@ def fed_balance_sheet_tab(raw: dict):
         "</span>",
         unsafe_allow_html=True
     )
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── FRED fetch status ─────────────────────────────────────────────────────
+    fetch_status = raw.get("bs_fetch_status", {})
+    BS_SERIES = ["WALCL", "TREAST", "WSHOMCB", "WTREGEN", "WRESBAL", "RRPONTSYD"]
+
+    loaded_bs  = [s for s in BS_SERIES if fetch_status.get(s, 0) > 0]
+    missing_bs = [s for s in BS_SERIES if fetch_status.get(s, 0) == 0]
+
+    # ── If no H.4.1 data at all, attempt inline fetch on the spot ─────────────
+    if not fetch_status or len(loaded_bs) == 0:
+        st.info("⏳ Fetching H.4.1 balance sheet data from FRED…")
+        fred_key = os.environ.get("FRED_API_KEY", "")
+
+        def _bs_inline(series_id, divisor):
+            s = fetch_fred(series_id, fred_key, "2019-01-01")
+            return (s / divisor) if len(s) > 0 else pd.Series(dtype=float)
+
+        walcl_s   = _bs_inline("WALCL",     1e6)
+        treast_s  = _bs_inline("TREAST",    1e6)
+        mbs_s     = _bs_inline("WSHOMCB",   1e6)
+        tga_s     = _bs_inline("WTREGEN",   1e3)
+        resbal_s  = _bs_inline("WRESBAL",   1e3)
+        rrp_s     = _bs_inline("RRPONTSYD", 1)
+
+        # Patch into raw and session state so they persist for this session
+        raw["bs_total_assets"]        = walcl_s
+        raw["bs_total_assets_latest"] = latest(walcl_s)
+        raw["bs_treasuries"]          = treast_s
+        raw["bs_treasuries_latest"]   = latest(treast_s)
+        raw["bs_mbs"]                 = mbs_s
+        raw["bs_mbs_latest"]          = latest(mbs_s)
+        raw["bs_tga"]                 = tga_s
+        raw["bs_tga_latest"]          = latest(tga_s)
+        raw["bs_reserves"]            = resbal_s
+        raw["bs_reserves_latest"]     = latest(resbal_s)
+        raw["bs_rrp"]                 = rrp_s
+        raw["bs_rrp_latest"]          = latest(rrp_s)
+
+        if len(walcl_s) >= 2:
+            wc = walcl_s.dropna()
+            raw["bs_wow_change_bn"] = round((wc.iloc[-1] - wc.iloc[-2]) * 1000, 1)
+        bs_peak_t = 8.965
+        walcl_lv = latest(walcl_s)
+        raw["bs_drawdown_pct"] = (
+            round((bs_peak_t - walcl_lv) / bs_peak_t * 100, 1)
+            if walcl_lv else None
+        )
+        fetch_status = {
+            "WALCL":     len(walcl_s),
+            "TREAST":    len(treast_s),
+            "WSHOMCB":   len(mbs_s),
+            "WTREGEN":   len(tga_s),
+            "WRESBAL":   len(resbal_s),
+            "RRPONTSYD": len(rrp_s),
+        }
+        raw["bs_fetch_status"] = fetch_status
+        if "indicator_data" in st.session_state:
+            st.session_state["indicator_data"] = raw
+
+        loaded_bs  = [s for s in BS_SERIES if fetch_status.get(s, 0) > 0]
+        missing_bs = [s for s in BS_SERIES if fetch_status.get(s, 0) == 0]
+
+        if loaded_bs:
+            st.success(f"✅ Fetched {len(loaded_bs)}/6 H.4.1 series successfully.")
+        else:
+            st.error(
+                "❌ Could not fetch H.4.1 data from FRED. "
+                "FRED may be temporarily unavailable or rate-limited. "
+                "Try clicking **🔄 Refresh data** in a minute."
+            )
+            if st.button("🔄 Retry now", type="primary", key="bs_force_refresh"):
+                for k in ["indicator_data", "indicator_ts"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+            return
+
+    elif missing_bs:
+        with st.expander(f"⚠️ {len(missing_bs)} series failed: {', '.join(missing_bs)}",
+                         expanded=False):
+            st.markdown(
+                f"**Loaded ({len(loaded_bs)}):** {', '.join(loaded_bs)}\n\n"
+                f"**Failed ({len(missing_bs)}):** {', '.join(missing_bs)}\n\n"
+                "Possible causes: FRED rate limit (120 req/min), temporary network block. "
+                f"Row counts: {fetch_status}"
+            )
+            if st.button("🔄 Retry FRED fetch", key="bs_retry"):
+                st.session_state.pop("indicator_data", None)
+                st.session_state.pop("indicator_ts", None)
+                st.rerun()
+    else:
+        st.success(
+            f"✅ All 6 H.4.1 series loaded — "
+            f"{', '.join(f'{s}: {fetch_status[s]}' for s in BS_SERIES)} rows",
+            icon=None,
+        )
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Pull values ─────────────────────────────────────────────────────────────

@@ -315,63 +315,83 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
             print(f"  {tkr:6s}: EMPTY")
 
     # ── 13. Fed H.4.1 Balance Sheet series (weekly, Thursday release) ──────────
-    # All series are Wednesday-level or week-average from FRED
+    # FRED units for H.4.1 series:
+    #   WALCL, TREAST, WSHOMCB, WTREGEN, WRESBAL → all in MILLIONS of USD
+    #   RRPONTSYD → already in BILLIONS of USD
+    # Small delay between calls to avoid FRED free-tier rate limit (120 req/min)
+    import time as _time
     print("\n[fetch] H.4.1 Balance Sheet ---")
 
-    # Total assets (WALCL) — the headline number, millions USD
-    walcl = fetch_fred("WALCL", key, "2019-01-01")
-    out["bs_total_assets"]        = walcl / 1e6   # convert to trillions
-    out["bs_total_assets_latest"] = latest(walcl / 1e6)
+    def _bs_fetch(series_id, divisor, label, delay=0.6):
+        """Fetch a balance sheet series, apply unit divisor, with rate-limit pause."""
+        _time.sleep(delay)   # avoid hitting FRED 120 req/min free-tier limit
+        raw_s = fetch_fred(series_id, key, "2019-01-01")
+        if len(raw_s) > 0:
+            converted = raw_s / divisor
+            lv = latest(converted)
+            print(f"  {series_id:12s}: {len(raw_s)} rows, "
+                  f"latest_raw={raw_s.dropna().iloc[-1]:,.0f} → {lv:.3f} {label}")
+            return converted, lv
+        else:
+            print(f"  {series_id:12s}: EMPTY — fetch failed")
+            return pd.Series(dtype=float), None
 
-    # US Treasury securities held outright (TREAST)
-    treast = fetch_fred("TREAST", key, "2019-01-01")
-    out["bs_treasuries"]        = treast / 1e6
-    out["bs_treasuries_latest"] = latest(treast / 1e6)
+    # WALCL: millions → trillions  (/1e6)
+    walcl_s,   walcl_lv   = _bs_fetch("WALCL",     1e6,  "T")
+    # TREAST: millions → trillions (/1e6)
+    treast_s,  treast_lv  = _bs_fetch("TREAST",    1e6,  "T")
+    # WSHOMCB: millions → trillions (/1e6)
+    mbs_s,     mbs_lv     = _bs_fetch("WSHOMCB",   1e6,  "T")
+    # WTREGEN: millions → billions (/1e3)
+    tga_s,     tga_lv     = _bs_fetch("WTREGEN",   1e3,  "B")
+    # WRESBAL: millions → billions (/1e3)
+    resbal_s,  resbal_lv  = _bs_fetch("WRESBAL",   1e3,  "B")
+    # RRPONTSYD: already billions (/1)
+    rrp_s,     rrp_lv     = _bs_fetch("RRPONTSYD", 1,    "B")
 
-    # Mortgage-backed securities held outright (WSHOMCB)
-    wshomcb = fetch_fred("WSHOMCB", key, "2019-01-01")
-    out["bs_mbs"]        = wshomcb / 1e6
-    out["bs_mbs_latest"] = latest(wshomcb / 1e6)
+    out["bs_total_assets"]        = walcl_s
+    out["bs_total_assets_latest"] = walcl_lv
+    out["bs_treasuries"]          = treast_s
+    out["bs_treasuries_latest"]   = treast_lv
+    out["bs_mbs"]                 = mbs_s
+    out["bs_mbs_latest"]          = mbs_lv
+    out["bs_tga"]                 = tga_s
+    out["bs_tga_latest"]          = tga_lv
+    out["bs_reserves"]            = resbal_s
+    out["bs_reserves_latest"]     = resbal_lv
+    out["bs_rrp"]                 = rrp_s
+    out["bs_rrp_latest"]          = rrp_lv
 
-    # Treasury General Account — TGA (WTREGEN), millions USD
-    wtregen = fetch_fred("WTREGEN", key, "2019-01-01")
-    out["bs_tga"]        = wtregen / 1e3   # convert millions → billions
-    out["bs_tga_latest"] = latest(wtregen / 1e3)
-
-    # Reserve balances held at Fed (WRESBAL), millions USD
-    wresbal = fetch_fred("WRESBAL", key, "2019-01-01")
-    out["bs_reserves"]        = wresbal / 1e3   # millions → billions
-    out["bs_reserves_latest"] = latest(wresbal / 1e3)
-
-    # Overnight reverse repos (ON RRP) — RRPONTSYD, billions USD
-    rrp = fetch_fred("RRPONTSYD", key, "2019-01-01")
-    out["bs_rrp"]        = rrp
-    out["bs_rrp_latest"] = latest(rrp)
-
-    # Week-over-week change in total assets
-    if len(walcl) >= 2:
-        walcl_clean = walcl.dropna()
-        out["bs_wow_change_bn"] = round(
-            (walcl_clean.iloc[-1] - walcl_clean.iloc[-2]) / 1e3, 1
-        )  # billions
+    # Week-over-week change in total assets (result in billions)
+    if len(walcl_s) >= 2:
+        wc = walcl_s.dropna()
+        # walcl_s is in trillions; *1000 → billions
+        out["bs_wow_change_bn"] = round((wc.iloc[-1] - wc.iloc[-2]) * 1000, 1)
     else:
         out["bs_wow_change_bn"] = None
 
-    # Peak (QT max) for drawdown calc — peak was ~$8.97T in April 2022
-    bs_peak = 8965.8  # billions
-    out["bs_peak_bn"] = bs_peak
-    if out["bs_total_assets_latest"] is not None:
+    # QT drawdown from April 2022 peak ($8.965T)
+    bs_peak_t = 8.965   # trillions
+    out["bs_peak_bn"] = bs_peak_t * 1000
+    if walcl_lv is not None:
         out["bs_drawdown_pct"] = round(
-            (bs_peak - out["bs_total_assets_latest"] * 1000) / bs_peak * 100, 1
+            (bs_peak_t - walcl_lv) / bs_peak_t * 100, 1
         )
     else:
         out["bs_drawdown_pct"] = None
 
-    for k in ["bs_total_assets_latest", "bs_treasuries_latest", "bs_mbs_latest",
-              "bs_tga_latest", "bs_reserves_latest", "bs_rrp_latest",
-              "bs_wow_change_bn", "bs_drawdown_pct"]:
-        v = out.get(k)
-        print(f"  {k:30s}: {f'{v:.2f}' if isinstance(v, float) else v}")
+    # Store raw fetch status so tab can show diagnostic
+    out["bs_fetch_status"] = {
+        "WALCL":     len(walcl_s),
+        "TREAST":    len(treast_s),
+        "WSHOMCB":   len(mbs_s),
+        "WTREGEN":   len(tga_s),
+        "WRESBAL":   len(resbal_s),
+        "RRPONTSYD": len(rrp_s),
+    }
+
+    print(f"  WoW change: {out['bs_wow_change_bn']} B | "
+          f"Drawdown: {out['bs_drawdown_pct']}%")
 
     # ── Final summary ──────────────────────────────────────────────────────────
     print("\n=== fetch_all_indicators complete ===")
