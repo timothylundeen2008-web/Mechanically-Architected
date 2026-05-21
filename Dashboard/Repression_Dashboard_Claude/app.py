@@ -400,6 +400,198 @@ def main():
         st.markdown('<p class="sec-label">Historical data — last 5 years</p>',
                     unsafe_allow_html=True)
 
+        # ── SPY vs Treasury Yield Overlay ──────────────────────────────────────
+        st.markdown("### SPY vs 2, 10 & 30-Year Treasury Yields")
+        st.markdown(
+            "<span style='color:#9aa3b2;font-size:.82rem;'>"
+            "Overlays SPY price (right axis) with 2-yr, 10-yr, and 30-yr Treasury yields (left axis). "
+            "When Treasury yields rise above the SPY earnings yield (~"
+            f"{raw.get('spy_earnings_yield', 0) or 0:.1f}% today"
+            "), bonds compete with equities for capital — a key repression signal."
+            "</span>",
+            unsafe_allow_html=True
+        )
+
+        # Controls row
+        ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 3])
+        with ctrl1:
+            show_spy_price = st.toggle("Show SPY price", value=True, key="tog_spy")
+        with ctrl2:
+            show_earnings_yield = st.toggle("Show SPY earnings yield", value=True,
+                                             key="tog_ey")
+        with ctrl3:
+            chart_period = st.select_slider(
+                "Period", options=["1Y", "2Y", "3Y", "5Y"], value="5Y",
+                key="chart_period"
+            )
+
+        period_days = {"1Y": 252, "2Y": 504, "3Y": 756, "5Y": 1260}[chart_period]
+
+        # Build overlay figure
+        fig_overlay = go.Figure()
+
+        # ── Bond yield traces (left y-axis) ────────────────────────────────────
+        bond_series = [
+            ("treasury_2y_series",  "2-yr Treasury",  "#4a8fd4", "dash"),
+            ("treasury_10y_series", "10-yr Treasury", "#d4913a", "solid"),
+            ("treasury_30y_series", "30-yr Treasury", "#e05252", "dot"),
+        ]
+        for key_name, label, color, dash in bond_series:
+            s = raw.get(key_name, pd.Series(dtype=float))
+            if s is not None and len(s) > 0:
+                s_trim = s.dropna().tail(period_days)
+                fig_overlay.add_trace(go.Scatter(
+                    x=s_trim.index, y=s_trim.values,
+                    name=label,
+                    line=dict(color=color, width=2, dash=dash),
+                    yaxis="y1",
+                    hovertemplate=f"{label}: %{{y:.2f}}%<extra></extra>",
+                ))
+
+        # ── SPY earnings yield (left y-axis, same scale as bond yields) ────────
+        if show_earnings_yield:
+            ey = raw.get("spy_earnings_yield_series", pd.Series(dtype=float))
+            if ey is not None and len(ey) > 0:
+                ey_trim = ey.dropna().tail(period_days)
+                fig_overlay.add_trace(go.Scatter(
+                    x=ey_trim.index, y=ey_trim.values,
+                    name="SPY Earnings Yield (EPS/Price)",
+                    line=dict(color="#5a9e47", width=1.8, dash="dashdot"),
+                    yaxis="y1",
+                    hovertemplate="SPY Earnings Yield: %{y:.2f}%<extra></extra>",
+                ))
+
+        # ── SPY price (right y-axis) ────────────────────────────────────────────
+        if show_spy_price:
+            spy_s = raw.get("spy_series", pd.Series(dtype=float))
+            if spy_s is not None and len(spy_s) > 0:
+                spy_trim = spy_s.dropna().tail(period_days)
+                fig_overlay.add_trace(go.Scatter(
+                    x=spy_trim.index, y=spy_trim.values,
+                    name="SPY Price ($)",
+                    line=dict(color="rgba(255,255,255,0.25)", width=1.5),
+                    fill="tozeroy",
+                    fillcolor="rgba(255,255,255,0.04)",
+                    yaxis="y2",
+                    hovertemplate="SPY: $%{y:.2f}<extra></extra>",
+                ))
+
+        # ── Layout with dual axes ───────────────────────────────────────────────
+        # Compute y-ranges for both axes
+        bond_vals = []
+        for key_name, _, _, _ in bond_series:
+            s = raw.get(key_name, pd.Series(dtype=float))
+            if s is not None and len(s) > 0:
+                bond_vals.extend(s.dropna().tail(period_days).values.tolist())
+        if show_earnings_yield:
+            ey = raw.get("spy_earnings_yield_series", pd.Series(dtype=float))
+            if ey is not None and len(ey) > 0:
+                bond_vals.extend(ey.dropna().tail(period_days).values.tolist())
+
+        y1_min = max(0, min(bond_vals) - 0.3) if bond_vals else 0
+        y1_max = max(bond_vals) + 0.5 if bond_vals else 10
+
+        spy_vals = []
+        if show_spy_price:
+            spy_s = raw.get("spy_series", pd.Series(dtype=float))
+            if spy_s is not None and len(spy_s) > 0:
+                spy_vals = spy_s.dropna().tail(period_days).values.tolist()
+        y2_min = min(spy_vals) * 0.92 if spy_vals else 0
+        y2_max = max(spy_vals) * 1.05 if spy_vals else 600
+
+        fig_overlay.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            height=420,
+            margin=dict(t=10, b=50, l=55, r=65),
+            hovermode="x unified",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.01,
+                xanchor="left", x=0,
+                font=dict(color="#9aa3b2", size=11),
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            xaxis=dict(
+                showgrid=False,
+                tickfont=dict(color="#5c6475", size=10),
+                linecolor="#242830",
+            ),
+            yaxis=dict(
+                title="Yield (%)",
+                title_font=dict(color="#9aa3b2", size=11),
+                tickfont=dict(color="#9aa3b2", size=10),
+                gridcolor="#1a1e25",
+                linecolor="#242830",
+                range=[y1_min, y1_max],
+                ticksuffix="%",
+                side="left",
+            ),
+            yaxis2=dict(
+                title="SPY Price ($)",
+                title_font=dict(color="#5c6475", size=11),
+                tickfont=dict(color="#5c6475", size=10),
+                gridcolor="rgba(0,0,0,0)",
+                linecolor="#242830",
+                range=[y2_min, y2_max],
+                tickprefix="$",
+                side="right",
+                overlaying="y",
+                showgrid=False,
+            ),
+        )
+
+        st.plotly_chart(fig_overlay, use_container_width=True,
+                        config={"displayModeBar": True,
+                                "modeBarButtonsToRemove": ["lasso2d", "select2d"]})
+
+        # ── Current spread callouts ─────────────────────────────────────────────
+        t2  = raw.get("treasury_2y")
+        t10 = raw.get("treasury_10y")
+        t30 = raw.get("treasury_30y")
+        ey  = raw.get("spy_earnings_yield")
+        spy_px = raw.get("spy_latest")
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        for col, label, val, color, suffix in [
+            (m1, "2-yr Yield",       t2,  "#4a8fd4", "%"),
+            (m2, "10-yr Yield",      t10, "#d4913a", "%"),
+            (m3, "30-yr Yield",      t30, "#e05252", "%"),
+            (m4, "SPY Earn. Yield",  ey,  "#5a9e47", "%"),
+            (m5, "SPY Price",        spy_px, "#9aa3b2", ""),
+        ]:
+            val_str = (f"${val:,.2f}" if suffix == "" and val
+                       else f"{val:.2f}{suffix}" if val else "N/A")
+            col.markdown(
+                f'<div style="background:#13161b;border:1px solid #242830;'
+                f'border-radius:8px;padding:.65rem .85rem;text-align:center;">'
+                f'<div style="font-size:1.1rem;font-weight:700;font-family:monospace;'
+                f'color:{color};">{val_str}</div>'
+                f'<div style="font-size:.68rem;color:#5c6475;text-transform:uppercase;'
+                f'letter-spacing:.05em;margin-top:2px;">{label}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+        # Yield curve shape callout
+        if t2 and t10:
+            spread_2_10 = round(t10 - t2, 2)
+            curve_color = "#5a9e47" if spread_2_10 > 0 else "#e05252"
+            curve_label = "Normal (upward sloping)" if spread_2_10 > 0.3 else \
+                          "Flat" if spread_2_10 >= 0 else "INVERTED ⚠"
+            st.markdown(
+                f'<div style="margin-top:10px;font-size:.8rem;color:#9aa3b2;">'
+                f'2s10s spread: <b style="color:{curve_color};">'
+                f'{spread_2_10:+.2f}%</b> — Yield curve: '
+                f'<b style="color:{curve_color};">{curve_label}</b>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+        st.markdown("---")
+
+        # ── Individual macro charts (existing) ─────────────────────────────────
+        st.markdown("**Individual macro indicator charts**")
+
         series_map = {
             "10-yr TIPS Real Yield (%)":    ("tips_real_yield_series",   0.0,  "Repression threshold: 0%",  "#4a8fd4"),
             "10-yr Treasury Nominal Yield":  ("treasury_10y_series",      5.0,  "Stress threshold: 5%",      "#d4913a"),
@@ -418,7 +610,6 @@ def main():
                     if threshold is not None:
                         fig = make_history_chart(series, title, threshold, t_label, clr)
                     else:
-                        # KRE price chart — compute -30% alert from 52-week high
                         kre_52w = raw.get("kre_52w_high")
                         kre_threshold = round(kre_52w * 0.70, 2) if kre_52w else None
                         kre_label = f"−30% alert (${kre_threshold:.2f})" if kre_threshold else ""

@@ -219,6 +219,34 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     out["treasury_10y_series"] = tsy
     out["treasury_10y"]        = latest(tsy)
 
+    # 2-yr Treasury yield (DGS2)
+    tsy2 = fetch_fred("DGS2", key, START)
+    out["treasury_2y_series"] = tsy2
+    out["treasury_2y"]        = latest(tsy2)
+
+    # 30-yr Treasury yield (DGS30)
+    tsy30 = fetch_fred("DGS30", key, START)
+    out["treasury_30y_series"] = tsy30
+    out["treasury_30y"]        = latest(tsy30)
+
+    # SPY price series for overlay chart (Yahoo Finance)
+    spy = fetch_yf_series("SPY", period="5y")
+    out["spy_series"] = spy
+    out["spy_latest"] = latest(spy)
+
+    # SPY earnings yield = 1 / (P/E). Approximate via FRED S&P 500 P/E (CAPE not
+    # available as simple series). Use forward P/E proxy: compute from SPY price
+    # and trailing EPS estimate stored as static (updated periodically).
+    # Trailing 12-mo EPS for S&P 500 approx $230 as of Q1 2026 (FactSet/Yardeni)
+    SP500_TRAILING_EPS = 230.0
+    if len(spy) > 0:
+        spy_earnings_yield = (SP500_TRAILING_EPS / spy) * 100  # as percent
+        out["spy_earnings_yield_series"] = spy_earnings_yield
+        out["spy_earnings_yield"]        = latest(spy_earnings_yield)
+    else:
+        out["spy_earnings_yield_series"] = pd.Series(dtype=float)
+        out["spy_earnings_yield"]        = None
+
     # ── 3. 10-yr TIPS real yield ───────────────────────────────────────────────
     print("\n[fetch] TIPS real yield ---")
     tips = fetch_fred("DFII10", key, START)
