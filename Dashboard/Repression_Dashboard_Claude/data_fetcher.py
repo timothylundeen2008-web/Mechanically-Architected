@@ -210,39 +210,75 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
           f"52w_high={out['kre_52w_high']}, "
           f"decline={out['kre_decline_pct']}%")
 
-    # ── 2. 10-yr Treasury nominal yield ───────────────────────────────────────
-    print("\n[fetch] Treasury 10yr ---")
-    tsy = fetch_fred("DGS10", key, START)
-    tnx = fetch_yf_series("^TNX", period="5y")
-    if len(tnx) > 0:
-        tsy = tsy.combine_first(tnx).sort_index()
-    out["treasury_10y_series"] = tsy
-    out["treasury_10y"]        = latest(tsy)
+    # ── 2. Treasury yields — all via Yahoo Finance for reliability ────────────
+    # Yahoo Finance tickers:
+    #   ^IRX = 13-week T-bill (best 2-yr proxy available intraday)
+    #   ^FVX = 5-yr Treasury
+    #   ^TNX = 10-yr Treasury
+    #   ^TYX = 30-yr Treasury
+    # FRED DGS series used as backup/history (may hit rate limits)
+    print("\n[fetch] Treasury yields ---")
 
-    # 2-yr Treasury yield (DGS2)
-    tsy2 = fetch_fred("DGS2", key, START)
+    # 10-yr: Yahoo Finance primary + FRED for longer history
+    tnx = fetch_yf_series("^TNX", period="5y")
+    tsy10_fred = fetch_fred("DGS10", key, START)
+    if len(tnx) > 0 and len(tsy10_fred) > 0:
+        tsy10 = tsy10_fred.combine_first(tnx).sort_index()
+    elif len(tnx) > 0:
+        tsy10 = tnx
+    else:
+        tsy10 = tsy10_fred
+    out["treasury_10y_series"] = tsy10
+    out["treasury_10y"]        = latest(tsy10)
+    print(f"  10-yr: {len(tsy10)} rows, latest={out['treasury_10y']}")
+
+    # 2-yr: Yahoo Finance ^IRX is 13-wk bill — use FRED DGS2 with yf fallback
+    # Note: ^IRX reports as annualized discount rate; divide by 10 to get percent
+    tsy2_fred = fetch_fred("DGS2", key, START)
+    irx = fetch_yf_series("^IRX", period="5y")
+    if len(irx) > 0:
+        irx_pct = irx / 10.0  # ^IRX is in tenths of a percent
+    else:
+        irx_pct = pd.Series(dtype=float)
+
+    if len(tsy2_fred) > 0:
+        tsy2 = tsy2_fred  # FRED DGS2 is most accurate 2-yr
+        if len(irx_pct) > 0:
+            tsy2 = tsy2.combine_first(irx_pct).sort_index()
+    else:
+        tsy2 = irx_pct   # fallback to ^IRX if FRED fails
     out["treasury_2y_series"] = tsy2
     out["treasury_2y"]        = latest(tsy2)
+    print(f"  2-yr:  {len(tsy2)} rows, latest={out['treasury_2y']}")
 
-    # 30-yr Treasury yield (DGS30)
-    tsy30 = fetch_fred("DGS30", key, START)
+    # 30-yr: Yahoo Finance ^TYX primary (very reliable) + FRED backup
+    tyx = fetch_yf_series("^TYX", period="5y")
+    if len(tyx) > 0:
+        # ^TYX is already in percent (e.g. 4.84 = 4.84%)
+        tsy30 = tyx
+        tsy30_fred = fetch_fred("DGS30", key, START)
+        if len(tsy30_fred) > 0:
+            tsy30 = tsy30_fred.combine_first(tyx).sort_index()
+    else:
+        tsy30 = fetch_fred("DGS30", key, START)
     out["treasury_30y_series"] = tsy30
     out["treasury_30y"]        = latest(tsy30)
+    print(f"  30-yr: {len(tsy30)} rows, latest={out['treasury_30y']}")
 
-    # SPY price series for overlay chart (Yahoo Finance)
+    # SPY price — Yahoo Finance (fetch here so it's available for overlay chart)
+    print("\n[fetch] SPY ---")
     spy = fetch_yf_series("SPY", period="5y")
     out["spy_series"] = spy
     out["spy_latest"] = latest(spy)
+    print(f"  SPY: {len(spy)} rows, latest={out['spy_latest']}")
 
-    # SPY earnings yield = 1 / (P/E). Approximate via FRED S&P 500 P/E (CAPE not
-    # available as simple series). Use forward P/E proxy: compute from SPY price
-    # and trailing EPS estimate stored as static (updated periodically).
-    # Trailing 12-mo EPS for S&P 500 approx $230 as of Q1 2026 (FactSet/Yardeni)
+    # SPY earnings yield (trailing EPS / price * 100)
+    # S&P 500 trailing 12-mo EPS ~$230 as of Q1 2026 (FactSet/Yardeni Research)
     SP500_TRAILING_EPS = 230.0
     if len(spy) > 0:
-        spy_earnings_yield = (SP500_TRAILING_EPS / spy) * 100  # as percent
-        out["spy_earnings_yield_series"] = spy_earnings_yield
-        out["spy_earnings_yield"]        = latest(spy_earnings_yield)
+        spy_ey = (SP500_TRAILING_EPS / spy) * 100
+        out["spy_earnings_yield_series"] = spy_ey
+        out["spy_earnings_yield"]        = latest(spy_ey)
     else:
         out["spy_earnings_yield_series"] = pd.Series(dtype=float)
         out["spy_earnings_yield"]        = None

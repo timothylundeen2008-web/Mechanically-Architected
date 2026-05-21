@@ -22,7 +22,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
-from data_fetcher import fetch_all_indicators
+from data_fetcher import fetch_all_indicators, fetch_yf_series, fetch_fred, latest
 from indicators   import build_scorecard, WATCHLIST, CATALYSTS
 
 # ─── Page config ───────────────────────────────────────────────────────────────
@@ -402,11 +402,34 @@ def main():
 
         # ── SPY vs Treasury Yield Overlay ──────────────────────────────────────
         st.markdown("### SPY vs 2, 10 & 30-Year Treasury Yields")
+
+        # Inline fallback: fetch any missing yield series on the spot
+        for yf_ticker, raw_key, series_key, divisor in [
+            ("^IRX", "treasury_2y",  "treasury_2y_series",  10.0),
+            ("^TYX", "treasury_30y", "treasury_30y_series", 1.0),
+            ("SPY",  "spy_latest",   "spy_series",          1.0),
+        ]:
+            if raw.get(series_key) is None or len(raw.get(series_key, pd.Series(dtype=float))) == 0:
+                with st.spinner(f"Loading {yf_ticker}…"):
+                    s = fetch_yf_series(yf_ticker, period="5y")
+                    if len(s) > 0 and divisor != 1.0:
+                        s = s / divisor
+                    raw[series_key] = s
+                    raw[raw_key]    = latest(s)
+                    if "indicator_data" in st.session_state:
+                        st.session_state["indicator_data"][series_key] = s
+                        st.session_state["indicator_data"][raw_key]    = latest(s)
+                    # Recompute SPY earnings yield if SPY just loaded
+                    if yf_ticker == "SPY" and len(s) > 0:
+                        ey = (230.0 / s) * 100
+                        raw["spy_earnings_yield_series"] = ey
+                        raw["spy_earnings_yield"]        = latest(ey)
+
         st.markdown(
             "<span style='color:#9aa3b2;font-size:.82rem;'>"
             "Overlays SPY price (right axis) with 2-yr, 10-yr, and 30-yr Treasury yields (left axis). "
             "When Treasury yields rise above the SPY earnings yield (~"
-            f"{raw.get('spy_earnings_yield', 0) or 0:.1f}% today"
+            f"{raw.get('spy_earnings_yield') or 0:.1f}% today"
             "), bonds compete with equities for capital — a key repression signal."
             "</span>",
             unsafe_allow_html=True
@@ -700,7 +723,6 @@ def fed_balance_sheet_tab(raw: dict):
     Renders the Fed H.4.1 Balance Sheet weekly tracker tab.
     Data sourced from FRED — updated every Thursday at 4:30 PM ET.
     """
-    from data_fetcher import fetch_fred, latest
 
     st.markdown("""
     <style>
