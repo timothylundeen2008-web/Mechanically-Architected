@@ -1,27 +1,22 @@
 """
 data_fetcher.py
 ================
-Pulls all financial repression indicator data from FRED and Yahoo Finance.
+Fetches all financial repression indicator data.
 
-yfinance strategy: Method A only — yf.download(multi_level_index=False)
-Confirmed working on Python 3.14.4 / yfinance 1.3.0 / pandas 3.0.2
-
-FRED series:
-  DGS10        — 10-yr Treasury constant maturity yield
-  DFII10       — 10-yr TIPS real yield
-  T10YIE       — 10-yr breakeven inflation rate
-  FEDFUNDS     — Effective federal funds rate
-  CPIAUCSL     — CPI all urban consumers
-  BAMLH0A0HYM2 — ICE BofA US High Yield OAS
-  GFDEGDQ188S  — Federal debt as % of GDP (quarterly)
-
-Yahoo Finance tickers:
-  KRE          — SPDR S&P Regional Banking ETF
-  ^TNX         — 10-yr Treasury yield (intraday supplement to FRED DGS10)
+Key improvements:
+  - All FRED series fetched in PARALLEL via ThreadPoolExecutor (max 3 concurrent)
+  - Per-request retry with exponential backoff (3 attempts, 30s timeout)
+  - Browser-like User-Agent headers to reduce Streamlit Cloud IP blocks
+  - Yahoo Finance primary for 2-yr (^IRX), 30-yr (^TYX), 10-yr (^TNX), SPY
+  - FRED used for history/accuracy, Yahoo Finance as live fallback
 """
 
 import warnings
 warnings.filterwarnings("ignore")
+
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import StringIO
 
 import pandas as pd
 import requests
@@ -34,132 +29,134 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  YAHOO FINANCE — Method A: download(multi_level_index=False)
+#  YAHOO FINANCE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_yf_series(ticker: str, period: str = "5y") -> pd.Series:
-    """
-    Fetch Yahoo Finance closing prices as a clean pd.Series.
-
-    Uses Method A: yf.download(multi_level_index=False) which returns flat
-    column names ('Close', 'High', ...) confirmed working on yfinance 1.3.0.
-
-    Falls back to Ticker.history() if Method A returns empty.
-    Returns empty Series on all failures — never raises.
-    """
     if not YFINANCE_OK:
-        print(f"[yfinance] Not installed — cannot fetch {ticker}")
         return pd.Series(dtype=float)
 
-    # ── Method A: flat columns (primary) ─────────────────────────────────────
+    # Attempt 1: download with flat columns
     try:
-        df = yf.download(
-            ticker,
-            period=period,
-            auto_adjust=True,
-            progress=False,
-            multi_level_index=False,
-        )
-        print(f"[yfinance-A] {ticker} raw shape={df.shape}, cols={df.columns.tolist()}")
-
-        if df.empty:
-            print(f"[yfinance-A] {ticker} returned empty DataFrame")
-        elif "Close" not in df.columns:
-            print(f"[yfinance-A] {ticker} missing Close column, got: {df.columns.tolist()}")
-        else:
+        df = yf.download(ticker, period=period, auto_adjust=True,
+                         progress=False, multi_level_index=False)
+        print(f"[yfinance-A] {ticker} shape={df.shape}, cols={df.columns.tolist()}")
+        if not df.empty and "Close" in df.columns:
             s = df["Close"]
-            # Ensure it is a Series, not a DataFrame
             if isinstance(s, pd.DataFrame):
-                print(f"[yfinance-A] {ticker} Close is DataFrame — taking first column")
                 s = s.iloc[:, 0]
             s = s.dropna().astype(float)
-            # Strip timezone
             if hasattr(s.index, "tz") and s.index.tz is not None:
                 s.index = s.index.tz_localize(None)
             s = s.sort_index()
             if len(s) > 0:
-                print(f"[yfinance-A] {ticker} OK: {len(s)} rows, "
-                      f"latest={s.iloc[-1]:.4f} ({s.index[-1].date()})")
+                print(f"[yfinance-A] {ticker} OK: {len(s)} rows, latest={s.iloc[-1]:.4f}")
                 return s
-            else:
-                print(f"[yfinance-A] {ticker} Close Series empty after dropna")
     except Exception as e:
-        print(f"[yfinance-A] {ticker} failed: {type(e).__name__}: {e}")
+        print(f"[yfinance-A] {ticker} failed: {e}")
 
-    # ── Method B: Ticker.history() (fallback) ─────────────────────────────────
+    # Attempt 2: Ticker.history()
     try:
-        print(f"[yfinance-B] {ticker} trying Ticker.history(period={period})")
         hist = yf.Ticker(ticker).history(period=period, auto_adjust=True)
-        print(f"[yfinance-B] {ticker} raw shape={hist.shape}, cols={hist.columns.tolist()}")
-
         if "Close" in hist.columns and not hist.empty:
             s = hist["Close"].dropna().astype(float)
             if hasattr(s.index, "tz") and s.index.tz is not None:
                 s.index = s.index.tz_localize(None)
             s = s.sort_index()
             if len(s) > 0:
-                print(f"[yfinance-B] {ticker} OK: {len(s)} rows, "
-                      f"latest={s.iloc[-1]:.4f} ({s.index[-1].date()})")
+                print(f"[yfinance-B] {ticker} OK: {len(s)} rows, latest={s.iloc[-1]:.4f}")
                 return s
     except Exception as e:
-        print(f"[yfinance-B] {ticker} failed: {type(e).__name__}: {e}")
+        print(f"[yfinance-B] {ticker} failed: {e}")
 
-    print(f"[yfinance] All methods failed for {ticker} — returning empty Series")
+    print(f"[yfinance] All methods failed for {ticker}")
     return pd.Series(dtype=float)
 
 
 def fetch_yf_latest(ticker: str) -> float | None:
-    """Most recent closing price only."""
     s = fetch_yf_series(ticker, period="5d")
     return float(s.iloc[-1]) if len(s) > 0 else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  FRED
+#  FRED — with retry, longer timeout, browser headers
 # ─────────────────────────────────────────────────────────────────────────────
 
 _FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 _FRED_API = "https://api.stlouisfed.org/fred/series/observations"
+_HEADERS  = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
 
-def _fred_csv(series_id: str, start: str = "2019-01-01") -> pd.Series:
-    """Public FRED CSV endpoint — no API key required."""
-    try:
-        url = f"{_FRED_CSV}?id={series_id}"
-        df  = pd.read_csv(url, parse_dates=["DATE"], index_col="DATE")
-        df.columns = ["value"]
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        s = df["value"].dropna()
-        s = s[s.index >= start]
-        print(f"[FRED CSV] {series_id}: {len(s)} rows, latest={s.iloc[-1]:.3f}")
-        return s
-    except Exception as e:
-        print(f"[FRED CSV] {series_id} failed: {e}")
-        return pd.Series(dtype=float)
+def _fred_csv(series_id: str, start: str = "2019-01-01",
+              max_retries: int = 3) -> pd.Series:
+    url = f"{_FRED_CSV}?id={series_id}"
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.get(url, headers=_HEADERS, timeout=30)
+            resp.raise_for_status()
+            df = pd.read_csv(StringIO(resp.text), parse_dates=["DATE"],
+                             index_col="DATE")
+            df.columns = ["value"]
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+            s = df["value"].dropna()
+            s = s[s.index >= start]
+            if len(s) > 0:
+                print(f"[FRED CSV] {series_id}: {len(s)} rows, "
+                      f"latest={s.iloc[-1]:.3f} (attempt {attempt})")
+                return s
+        except requests.exceptions.ReadTimeout:
+            wait = 2 ** attempt
+            print(f"[FRED CSV] {series_id}: ReadTimeout attempt {attempt} — wait {wait}s")
+            if attempt < max_retries:
+                _time.sleep(wait)
+        except Exception as e:
+            print(f"[FRED CSV] {series_id}: error attempt {attempt}: {type(e).__name__}: {e}")
+            if attempt < max_retries:
+                _time.sleep(1)
+    print(f"[FRED CSV] {series_id}: all {max_retries} attempts failed")
+    return pd.Series(dtype=float)
 
 
-def _fred_api(series_id: str, api_key: str, start: str = "2019-01-01") -> pd.Series:
-    """Official FRED API — requires free key, higher rate limits."""
-    try:
-        r = requests.get(_FRED_API, params={
-            "series_id": series_id, "api_key": api_key,
-            "file_type": "json", "observation_start": start, "sort_order": "asc",
-        }, timeout=12)
-        r.raise_for_status()
-        obs  = r.json().get("observations", [])
-        data = {pd.Timestamp(o["date"]): float(o["value"])
-                for o in obs if o.get("value", ".") != "."}
-        s = pd.Series(data)
-        print(f"[FRED API] {series_id}: {len(s)} rows")
-        return s
-    except Exception as e:
-        print(f"[FRED API] {series_id} failed: {e}")
-        return pd.Series(dtype=float)
+def _fred_api(series_id: str, api_key: str, start: str = "2019-01-01",
+              max_retries: int = 3) -> pd.Series:
+    params = {
+        "series_id": series_id, "api_key": api_key,
+        "file_type": "json", "observation_start": start, "sort_order": "asc",
+    }
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(_FRED_API, params=params,
+                             headers=_HEADERS, timeout=30)
+            r.raise_for_status()
+            obs  = r.json().get("observations", [])
+            data = {pd.Timestamp(o["date"]): float(o["value"])
+                    for o in obs if o.get("value", ".") != "."}
+            s = pd.Series(data)
+            if len(s) > 0:
+                print(f"[FRED API] {series_id}: {len(s)} rows (attempt {attempt})")
+                return s
+        except requests.exceptions.ReadTimeout:
+            wait = 2 ** attempt
+            print(f"[FRED API] {series_id}: ReadTimeout attempt {attempt} — wait {wait}s")
+            if attempt < max_retries:
+                _time.sleep(wait)
+        except Exception as e:
+            print(f"[FRED API] {series_id}: error attempt {attempt}: {e}")
+            if attempt < max_retries:
+                _time.sleep(1)
+    return pd.Series(dtype=float)
 
 
 def fetch_fred(series_id: str, api_key: str = "",
                start: str = "2019-01-01") -> pd.Series:
-    """Fetch FRED series — API key if provided, else public CSV."""
     if api_key:
         s = _fred_api(series_id, api_key, start)
         if len(s) > 0:
@@ -167,8 +164,37 @@ def fetch_fred(series_id: str, api_key: str = "",
     return _fred_csv(series_id, start)
 
 
+def fetch_fred_batch(series_dict: dict, api_key: str = "",
+                     start: str = "2019-01-01",
+                     max_workers: int = 3) -> dict:
+    """
+    Fetch multiple FRED series in parallel.
+    max_workers=3 avoids hammering FRED; each worker has its own retry logic.
+    """
+    results = {}
+
+    def _one(output_key, series_id):
+        _time.sleep(0.4)   # small stagger so threads don't all hit FRED at t=0
+        return output_key, fetch_fred(series_id, api_key, start)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_one, k, v): k for k, v in series_dict.items()}
+        for future in as_completed(futures):
+            try:
+                out_key, series = future.result()
+                results[out_key] = series
+                n  = len(series)
+                lv = f"{series.dropna().iloc[-1]:.3f}" if n > 0 else "EMPTY"
+                print(f"[batch] {out_key:32s}: {n} rows, latest={lv}")
+            except Exception as e:
+                k = futures[future]
+                print(f"[batch] {k}: exception {e}")
+                results[k] = pd.Series(dtype=float)
+
+    return results
+
+
 def latest(series: pd.Series) -> float | None:
-    """Most recent non-NaN value, or None."""
     if series is None or len(series) == 0:
         return None
     clean = series.dropna()
@@ -181,17 +207,54 @@ def latest(series: pd.Series) -> float | None:
 
 def fetch_all_indicators(fred_api_key: str = "") -> dict:
     """
-    Fetch all indicator data from FRED and Yahoo Finance.
-    Returns dict of scalar values and historical pd.Series.
-    Never raises — missing data returns None or empty Series.
+    Fetch all indicator data.  Returns dict of scalars and pd.Series.
+    Never raises — missing data → None or empty Series.
     """
     START = "2019-01-01"
     key   = fred_api_key or ""
     out   = {}
 
-    # ── 1. KRE — SPDR S&P Regional Banking ETF ────────────────────────────────
-    print("\n[fetch] KRE ---")
-    kre = fetch_yf_series("KRE", period="5y")
+    # ── Step 1: Batch-fetch all FRED series in parallel ───────────────────────
+    print("\n[fetch] FRED parallel batch (max 3 concurrent) ---")
+    fred_batch = {
+        "tips_real_yield_series": "DFII10",
+        "treasury_10y_series":    "DGS10",
+        "treasury_2y_series":     "DGS2",
+        "treasury_30y_series":    "DGS30",
+        "breakeven_series":       "T10YIE",
+        "fed_funds_series":       "FEDFUNDS",
+        "hy_spread_series":       "BAMLH0A0HYM2",
+        # H.4.1 balance sheet (millions of USD except RRPONTSYD which is billions)
+        "bs_walcl_raw":           "WALCL",
+        "bs_treast_raw":          "TREAST",
+        "bs_mbs_raw":             "WSHOMCB",
+        "bs_tga_raw":             "WTREGEN",
+        "bs_reserves_raw":        "WRESBAL",
+        "bs_rrp_raw":             "RRPONTSYD",
+    }
+    batch = fetch_fred_batch(fred_batch, key, START, max_workers=3)
+    out.update(batch)
+
+    # CPI and debt need different start dates — fetch separately
+    out["cpi_raw_series"]  = fetch_fred("CPIAUCSL",       key, "2017-01-01")
+    out["debt_gdp_series"] = fetch_fred("GFDEGDQ188S",    key, "2015-01-01")
+
+    # ── Step 2: Yahoo Finance tickers ─────────────────────────────────────────
+    print("\n[fetch] Yahoo Finance ---")
+    yf_tickers = {
+        "kre":  ("KRE",  "5y", 1.0),
+        "tnx":  ("^TNX", "5y", 1.0),   # 10-yr live
+        "tyx":  ("^TYX", "5y", 1.0),   # 30-yr live
+        "irx":  ("^IRX", "5y", 10.0),  # 13-wk T-bill → divide by 10 for %
+        "spy":  ("SPY",  "5y", 1.0),
+    }
+    yf_data = {}
+    for label, (ticker, period, div) in yf_tickers.items():
+        s = fetch_yf_series(ticker, period=period)
+        yf_data[label] = (s / div) if (len(s) > 0 and div != 1.0) else s
+
+    # ── Step 3: KRE ───────────────────────────────────────────────────────────
+    kre = yf_data["kre"]
     out["kre_series"]  = kre
     out["kre_current"] = latest(kre)
     out["kre_52w_high"] = (
@@ -199,111 +262,58 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
         else float(kre.max())      if len(kre) > 0
         else None
     )
-    if out["kre_current"] and out["kre_52w_high"]:
-        out["kre_decline_pct"] = round(
-            (out["kre_52w_high"] - out["kre_current"])
-            / out["kre_52w_high"] * 100, 1
-        )
-    else:
-        out["kre_decline_pct"] = None
-    print(f"[fetch] KRE current={out['kre_current']}, "
-          f"52w_high={out['kre_52w_high']}, "
-          f"decline={out['kre_decline_pct']}%")
+    out["kre_decline_pct"] = (
+        round((out["kre_52w_high"] - out["kre_current"])
+              / out["kre_52w_high"] * 100, 1)
+        if out["kre_current"] and out["kre_52w_high"] else None
+    )
 
-    # ── 2. Treasury yields — all via Yahoo Finance for reliability ────────────
-    # Yahoo Finance tickers:
-    #   ^IRX = 13-week T-bill (best 2-yr proxy available intraday)
-    #   ^FVX = 5-yr Treasury
-    #   ^TNX = 10-yr Treasury
-    #   ^TYX = 30-yr Treasury
-    # FRED DGS series used as backup/history (may hit rate limits)
-    print("\n[fetch] Treasury yields ---")
-
-    # 10-yr: Yahoo Finance primary + FRED for longer history
-    tnx = fetch_yf_series("^TNX", period="5y")
-    tsy10_fred = fetch_fred("DGS10", key, START)
-    if len(tnx) > 0 and len(tsy10_fred) > 0:
-        tsy10 = tsy10_fred.combine_first(tnx).sort_index()
-    elif len(tnx) > 0:
-        tsy10 = tnx
-    else:
-        tsy10 = tsy10_fred
+    # ── Step 4: Treasury yields (merge FRED history + Yahoo live) ─────────────
+    # 10-yr
+    tsy10_f = out.get("treasury_10y_series", pd.Series(dtype=float))
+    tnx     = yf_data["tnx"]
+    tsy10   = tsy10_f.combine_first(tnx).sort_index() if len(tsy10_f) > 0 and len(tnx) > 0 \
+              else tnx if len(tnx) > 0 else tsy10_f
     out["treasury_10y_series"] = tsy10
     out["treasury_10y"]        = latest(tsy10)
-    print(f"  10-yr: {len(tsy10)} rows, latest={out['treasury_10y']}")
 
-    # 2-yr: Yahoo Finance ^IRX is 13-wk bill — use FRED DGS2 with yf fallback
-    # Note: ^IRX reports as annualized discount rate; divide by 10 to get percent
-    tsy2_fred = fetch_fred("DGS2", key, START)
-    irx = fetch_yf_series("^IRX", period="5y")
-    if len(irx) > 0:
-        irx_pct = irx / 10.0  # ^IRX is in tenths of a percent
-    else:
-        irx_pct = pd.Series(dtype=float)
-
-    if len(tsy2_fred) > 0:
-        tsy2 = tsy2_fred  # FRED DGS2 is most accurate 2-yr
-        if len(irx_pct) > 0:
-            tsy2 = tsy2.combine_first(irx_pct).sort_index()
-    else:
-        tsy2 = irx_pct   # fallback to ^IRX if FRED fails
+    # 2-yr
+    tsy2_f = out.get("treasury_2y_series", pd.Series(dtype=float))
+    irx    = yf_data["irx"]
+    tsy2   = tsy2_f.combine_first(irx).sort_index() if len(tsy2_f) > 0 and len(irx) > 0 \
+             else irx if len(irx) > 0 else tsy2_f
     out["treasury_2y_series"] = tsy2
     out["treasury_2y"]        = latest(tsy2)
-    print(f"  2-yr:  {len(tsy2)} rows, latest={out['treasury_2y']}")
 
-    # 30-yr: Yahoo Finance ^TYX primary (very reliable) + FRED backup
-    tyx = fetch_yf_series("^TYX", period="5y")
-    if len(tyx) > 0:
-        # ^TYX is already in percent (e.g. 4.84 = 4.84%)
-        tsy30 = tyx
-        tsy30_fred = fetch_fred("DGS30", key, START)
-        if len(tsy30_fred) > 0:
-            tsy30 = tsy30_fred.combine_first(tyx).sort_index()
-    else:
-        tsy30 = fetch_fred("DGS30", key, START)
+    # 30-yr
+    tsy30_f = out.get("treasury_30y_series", pd.Series(dtype=float))
+    tyx     = yf_data["tyx"]
+    tsy30   = tsy30_f.combine_first(tyx).sort_index() if len(tsy30_f) > 0 and len(tyx) > 0 \
+              else tyx if len(tyx) > 0 else tsy30_f
     out["treasury_30y_series"] = tsy30
     out["treasury_30y"]        = latest(tsy30)
-    print(f"  30-yr: {len(tsy30)} rows, latest={out['treasury_30y']}")
 
-    # SPY price — Yahoo Finance (fetch here so it's available for overlay chart)
-    print("\n[fetch] SPY ---")
-    spy = fetch_yf_series("SPY", period="5y")
+    # ── Step 5: SPY + earnings yield ──────────────────────────────────────────
+    spy = yf_data["spy"]
     out["spy_series"] = spy
     out["spy_latest"] = latest(spy)
-    print(f"  SPY: {len(spy)} rows, latest={out['spy_latest']}")
-
-    # SPY earnings yield (trailing EPS / price * 100)
-    # S&P 500 trailing 12-mo EPS ~$230 as of Q1 2026 (FactSet/Yardeni Research)
-    SP500_TRAILING_EPS = 230.0
     if len(spy) > 0:
-        spy_ey = (SP500_TRAILING_EPS / spy) * 100
+        spy_ey = (230.0 / spy) * 100   # trailing EPS ~$230 (FactSet Q1 2026)
         out["spy_earnings_yield_series"] = spy_ey
         out["spy_earnings_yield"]        = latest(spy_ey)
     else:
         out["spy_earnings_yield_series"] = pd.Series(dtype=float)
         out["spy_earnings_yield"]        = None
 
-    # ── 3. 10-yr TIPS real yield ───────────────────────────────────────────────
-    print("\n[fetch] TIPS real yield ---")
-    tips = fetch_fred("DFII10", key, START)
-    out["tips_real_yield_series"] = tips
-    out["tips_real_yield"]        = latest(tips)
+    # ── Step 6: Derived macro scalars ─────────────────────────────────────────
+    out["tips_real_yield"] = latest(out.get("tips_real_yield_series", pd.Series(dtype=float)))
+    out["breakeven"]       = latest(out.get("breakeven_series",       pd.Series(dtype=float)))
+    out["fed_funds"]       = latest(out.get("fed_funds_series",       pd.Series(dtype=float)))
+    out["hy_spread"]       = latest(out.get("hy_spread_series",       pd.Series(dtype=float)))
+    out["debt_gdp_pct"]    = latest(out.get("debt_gdp_series",        pd.Series(dtype=float)))
 
-    # ── 4. 10-yr breakeven inflation ──────────────────────────────────────────
-    print("\n[fetch] Breakeven ---")
-    be = fetch_fred("T10YIE", key, START)
-    out["breakeven_series"] = be
-    out["breakeven"]        = latest(be)
-
-    # ── 5. Effective Federal Funds Rate ───────────────────────────────────────
-    print("\n[fetch] Fed funds ---")
-    ffr = fetch_fred("FEDFUNDS", key, START)
-    out["fed_funds_series"] = ffr
-    out["fed_funds"]        = latest(ffr)
-
-    # ── 6. CPI YoY ────────────────────────────────────────────────────────────
-    print("\n[fetch] CPI ---")
-    cpi_raw = fetch_fred("CPIAUCSL", key, "2017-01-01")
+    # CPI YoY
+    cpi_raw = out.get("cpi_raw_series", pd.Series(dtype=float))
     if len(cpi_raw) >= 12:
         cpi_yoy = (cpi_raw.pct_change(12) * 100).dropna()
         cpi_yoy = cpi_yoy[cpi_yoy.index >= START]
@@ -312,156 +322,85 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     out["cpi_yoy_series"] = cpi_yoy
     out["cpi_yoy"]        = latest(cpi_yoy)
 
-    # ── 7. Real policy rate ────────────────────────────────────────────────────
+    # Real policy rate
+    ffr = out.get("fed_funds_series", pd.Series(dtype=float))
     if out["fed_funds"] is not None and out["cpi_yoy"] is not None:
         out["real_policy_rate"] = round(out["fed_funds"] - out["cpi_yoy"], 2)
     else:
         out["real_policy_rate"] = None
-
     if len(ffr) > 0 and len(cpi_yoy) > 0:
-        ffr_m = ffr.resample("ME").last()
-        cpi_m = cpi_yoy.resample("ME").last()
-        out["real_policy_rate_series"] = (ffr_m - cpi_m).dropna()
+        out["real_policy_rate_series"] = (
+            ffr.resample("ME").last() - cpi_yoy.resample("ME").last()
+        ).dropna()
     else:
         out["real_policy_rate_series"] = pd.Series(dtype=float)
 
-    # ── 8. HY credit spread ────────────────────────────────────────────────────
-    print("\n[fetch] HY spread ---")
-    hy = fetch_fred("BAMLH0A0HYM2", key, START)
-    out["hy_spread_series"] = hy
-    out["hy_spread"]        = latest(hy)
-
-    # ── 9. Debt-to-GDP ─────────────────────────────────────────────────────────
-    print("\n[fetch] Debt/GDP ---")
-    debt = fetch_fred("GFDEGDQ188S", key, "2015-01-01")
-    out["debt_gdp_series"] = debt
-    out["debt_gdp_pct"]    = latest(debt)
-
-    # ── 10. Static CBO values ──────────────────────────────────────────────────
-    out["deficit_gdp_pct"]  = 5.9
-    out["interest_gdp_pct"] = 3.3
-
-    # ── 11. Implied breakeven ──────────────────────────────────────────────────
+    # Implied breakeven
     if out["treasury_10y"] is not None and out["tips_real_yield"] is not None:
-        out["implied_breakeven"] = round(
-            out["treasury_10y"] - out["tips_real_yield"], 2
-        )
+        out["implied_breakeven"] = round(out["treasury_10y"] - out["tips_real_yield"], 2)
     else:
         out["implied_breakeven"] = out.get("breakeven")
 
-    # ── 12. Wealth-building asset tickers (pre-fetched for Tab 5) ─────────────
-    # One primary ticker per asset — stored as "wealth_{TICKER}_series"
-    # Fetched here so the tab renders instantly without per-chart spinner delays.
-    WEALTH_TICKERS = [
-        # Before
-        "SCHP",   # TIPS ETF
-        "GLD",    # Gold
-        "VYM",    # Dividend equity
-        "VNQ",    # REITs
-        # During
-        "XLE",    # Energy
-        "VEA",    # Intl developed equity
-        "FLOT",   # Floating rate
-        "IBIT",   # Bitcoin ETF
-        # After
-        "TLT",    # Long Treasuries
-        "QQQ",    # Growth/Tech
-        "VT",     # Global equity
-    ]
-    print("\n[fetch] Wealth asset tickers ---")
-    for tkr in WEALTH_TICKERS:
-        key_name = f"wealth_{tkr}_series"
-        s = fetch_yf_series(tkr, period="2y")
-        out[key_name] = s
-        if len(s) > 0:
-            print(f"  {tkr:6s}: {len(s)} rows, latest={s.iloc[-1]:.2f}")
-        else:
-            print(f"  {tkr:6s}: EMPTY")
+    # Static CBO values
+    out["deficit_gdp_pct"]  = 5.9
+    out["interest_gdp_pct"] = 3.3
 
-    # ── 13. Fed H.4.1 Balance Sheet series (weekly, Thursday release) ──────────
-    # FRED units for H.4.1 series:
-    #   WALCL, TREAST, WSHOMCB, WTREGEN, WRESBAL → all in MILLIONS of USD
-    #   RRPONTSYD → already in BILLIONS of USD
-    # Small delay between calls to avoid FRED free-tier rate limit (120 req/min)
-    import time as _time
-    print("\n[fetch] H.4.1 Balance Sheet ---")
+    # ── Step 7: H.4.1 Balance sheet unit conversions ──────────────────────────
+    # WALCL, TREAST, WSHOMCB, WTREGEN, WRESBAL → millions → convert to T or B
+    # RRPONTSYD → already in billions
+    print("\n[fetch] H.4.1 unit conversions ---")
 
-    def _bs_fetch(series_id, divisor, label, delay=0.6):
-        """Fetch a balance sheet series, apply unit divisor, with rate-limit pause."""
-        _time.sleep(delay)   # avoid hitting FRED 120 req/min free-tier limit
-        raw_s = fetch_fred(series_id, key, "2019-01-01")
-        if len(raw_s) > 0:
-            converted = raw_s / divisor
-            lv = latest(converted)
-            print(f"  {series_id:12s}: {len(raw_s)} rows, "
-                  f"latest_raw={raw_s.dropna().iloc[-1]:,.0f} → {lv:.3f} {label}")
-            return converted, lv
-        else:
-            print(f"  {series_id:12s}: EMPTY — fetch failed")
-            return pd.Series(dtype=float), None
+    def _bs(raw_key, divisor, out_key, scalar_key):
+        s_raw = out.get(raw_key, pd.Series(dtype=float))
+        s     = (s_raw / divisor) if len(s_raw) > 0 else pd.Series(dtype=float)
+        out[out_key]    = s
+        out[scalar_key] = latest(s)
+        lv = f"{out[scalar_key]:.3f}" if out[scalar_key] else "N/A"
+        print(f"  {raw_key:15s} → {out_key:25s}: latest={lv}")
 
-    # WALCL: millions → trillions  (/1e6)
-    walcl_s,   walcl_lv   = _bs_fetch("WALCL",     1e6,  "T")
-    # TREAST: millions → trillions (/1e6)
-    treast_s,  treast_lv  = _bs_fetch("TREAST",    1e6,  "T")
-    # WSHOMCB: millions → trillions (/1e6)
-    mbs_s,     mbs_lv     = _bs_fetch("WSHOMCB",   1e6,  "T")
-    # WTREGEN: millions → billions (/1e3)
-    tga_s,     tga_lv     = _bs_fetch("WTREGEN",   1e3,  "B")
-    # WRESBAL: millions → billions (/1e3)
-    resbal_s,  resbal_lv  = _bs_fetch("WRESBAL",   1e3,  "B")
-    # RRPONTSYD: already billions (/1)
-    rrp_s,     rrp_lv     = _bs_fetch("RRPONTSYD", 1,    "B")
+    _bs("bs_walcl_raw",    1e6, "bs_total_assets",   "bs_total_assets_latest")  # M→T
+    _bs("bs_treast_raw",   1e6, "bs_treasuries",     "bs_treasuries_latest")    # M→T
+    _bs("bs_mbs_raw",      1e6, "bs_mbs",            "bs_mbs_latest")           # M→T
+    _bs("bs_tga_raw",      1e3, "bs_tga",            "bs_tga_latest")           # M→B
+    _bs("bs_reserves_raw", 1e3, "bs_reserves",       "bs_reserves_latest")      # M→B
+    _bs("bs_rrp_raw",      1.0, "bs_rrp",            "bs_rrp_latest")           # already B
 
-    out["bs_total_assets"]        = walcl_s
-    out["bs_total_assets_latest"] = walcl_lv
-    out["bs_treasuries"]          = treast_s
-    out["bs_treasuries_latest"]   = treast_lv
-    out["bs_mbs"]                 = mbs_s
-    out["bs_mbs_latest"]          = mbs_lv
-    out["bs_tga"]                 = tga_s
-    out["bs_tga_latest"]          = tga_lv
-    out["bs_reserves"]            = resbal_s
-    out["bs_reserves_latest"]     = resbal_lv
-    out["bs_rrp"]                 = rrp_s
-    out["bs_rrp_latest"]          = rrp_lv
-
-    # Week-over-week change in total assets (result in billions)
-    if len(walcl_s) >= 2:
-        wc = walcl_s.dropna()
-        # walcl_s is in trillions; *1000 → billions
-        out["bs_wow_change_bn"] = round((wc.iloc[-1] - wc.iloc[-2]) * 1000, 1)
-    else:
-        out["bs_wow_change_bn"] = None
-
-    # QT drawdown from April 2022 peak ($8.965T)
-    bs_peak_t = 8.965   # trillions
-    out["bs_peak_bn"] = bs_peak_t * 1000
-    if walcl_lv is not None:
-        out["bs_drawdown_pct"] = round(
-            (bs_peak_t - walcl_lv) / bs_peak_t * 100, 1
-        )
-    else:
-        out["bs_drawdown_pct"] = None
-
-    # Store raw fetch status so tab can show diagnostic
+    walcl_clean = out.get("bs_total_assets", pd.Series(dtype=float)).dropna()
+    out["bs_wow_change_bn"] = (
+        round((walcl_clean.iloc[-1] - walcl_clean.iloc[-2]) * 1000, 1)
+        if len(walcl_clean) >= 2 else None
+    )
+    bs_peak = 8965.8   # billions
+    out["bs_peak_bn"] = bs_peak
+    ta = out.get("bs_total_assets_latest")
+    out["bs_drawdown_pct"] = (
+        round((bs_peak - ta * 1000) / bs_peak * 100, 1) if ta else None
+    )
     out["bs_fetch_status"] = {
-        "WALCL":     len(walcl_s),
-        "TREAST":    len(treast_s),
-        "WSHOMCB":   len(mbs_s),
-        "WTREGEN":   len(tga_s),
-        "WRESBAL":   len(resbal_s),
-        "RRPONTSYD": len(rrp_s),
+        "WALCL":     len(out.get("bs_walcl_raw",    pd.Series(dtype=float))),
+        "TREAST":    len(out.get("bs_treast_raw",   pd.Series(dtype=float))),
+        "WSHOMCB":   len(out.get("bs_mbs_raw",      pd.Series(dtype=float))),
+        "WTREGEN":   len(out.get("bs_tga_raw",      pd.Series(dtype=float))),
+        "WRESBAL":   len(out.get("bs_reserves_raw", pd.Series(dtype=float))),
+        "RRPONTSYD": len(out.get("bs_rrp_raw",      pd.Series(dtype=float))),
     }
 
-    print(f"  WoW change: {out['bs_wow_change_bn']} B | "
-          f"Drawdown: {out['bs_drawdown_pct']}%")
+    # ── Step 8: Wealth asset tickers ──────────────────────────────────────────
+    WEALTH_TICKERS = ["SCHP","GLD","VYM","VNQ","XLE","VEA","FLOT","IBIT","TLT","QQQ","VT"]
+    print("\n[fetch] Wealth asset tickers ---")
+    for tkr in WEALTH_TICKERS:
+        s = fetch_yf_series(tkr, period="2y")
+        out[f"wealth_{tkr}_series"] = s
+        lv = f"{s.iloc[-1]:.2f}" if len(s) > 0 else "EMPTY"
+        print(f"  {tkr:6s}: {len(s)} rows, latest={lv}")
 
     # ── Final summary ──────────────────────────────────────────────────────────
     print("\n=== fetch_all_indicators complete ===")
-    for k in ["treasury_10y", "tips_real_yield", "breakeven", "fed_funds",
-              "cpi_yoy", "real_policy_rate", "hy_spread", "debt_gdp_pct",
-              "kre_current", "kre_52w_high", "kre_decline_pct"]:
+    for k in ["treasury_10y", "treasury_2y", "treasury_30y",
+              "tips_real_yield", "breakeven", "fed_funds", "cpi_yoy",
+              "real_policy_rate", "hy_spread", "debt_gdp_pct",
+              "kre_current", "spy_latest",
+              "bs_total_assets_latest", "bs_wow_change_bn"]:
         v = out.get(k)
         print(f"  {k:30s}: {f'{v:.4f}' if isinstance(v, float) else v}")
 
