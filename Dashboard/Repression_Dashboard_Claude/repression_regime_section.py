@@ -25,12 +25,12 @@ import regime_classifier as rc
 
 _REGIME_COLOR = {
     "inflationary_repression": "#c026d3",
+    "hard_repression": "#9333ea",        # ← add (same purple as the portfolio app)
     "liquidity_crisis": "#dc2626",
     "stagflation": "#d97706",
     "goldilocks": "#16a34a",
     "neutral": "#6b7280",
 }
-
 
 def _arrow(x):
     if x is None:
@@ -160,10 +160,11 @@ def _real_yield_chart(fred_api_key, kw):
 
 def _quadrant_table(active_key):
     rows = []
-    order = ["inflationary_repression", "liquidity_crisis",
-             "stagflation", "goldilocks"]
+    order = ["inflationary_repression", "hard_repression",
+             "liquidity_crisis", "stagflation", "goldilocks"]
     disc = {
         "inflationary_repression": "short real −  ·  long real ↑",
+        "hard_repression": "short real −  ·  long real ↓  ·  credit calm",   # ← add
         "liquidity_crisis": "HY blowout  ·  long real ↓",
         "stagflation": "short real −  ·  2s10s re-steepening",
         "goldilocks": "short real +  ·  credit tight",
