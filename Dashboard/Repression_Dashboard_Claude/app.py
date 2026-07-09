@@ -1874,7 +1874,7 @@ ASSETS = [
             "Managed Total Return Fund to 8.4% avg annual return over 27 years."
         ),
         "signal_enter": "Real policy rate negative AND CPI > 4% — floaters beat all fixed-rate instruments",
-        "signal_exit":  "Fed begins hiking cycle in earnest — exit floaters, enter long nominal bonds",
+        "signal_exit":  "Fed signals the END of the hiking cycle (terminal rate in) — rotate floaters into long nominal bonds to lock the cycle-peak yield",
         "color": "#4a8fd4",
         "phase_color": "#185FA5",
     },
