@@ -236,14 +236,8 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     out.update(batch)
 
     # CPI and debt need different start dates — fetch separately
-    # NSA (CPIAUCNS) is the CALCULATION series: the publicly-quoted headline
-    # YoY figure (e.g. "CPI rose 4.2%") is BLS's official number, computed
-    # from the UNADJUSTED index. CPIAUCSL's seasonal factors are re-revised
-    # annually (each Feb) and can visibly diverge from the quoted headline —
-    # fetched separately below for DISPLAY only, never for calculation.
-    out["cpi_raw_series"]     = fetch_fred("CPIAUCNS",     key, "2017-01-01")
-    out["cpi_raw_sa_series"]  = fetch_fred("CPIAUCSL",     key, "2017-01-01")
-    out["debt_gdp_series"]    = fetch_fred("GFDEGDQ188S",  key, "2015-01-01")
+    out["cpi_raw_series"]  = fetch_fred("CPIAUCSL",       key, "2017-01-01")
+    out["debt_gdp_series"] = fetch_fred("GFDEGDQ188S",    key, "2015-01-01")
 
     # ── Step 2: Yahoo Finance tickers ─────────────────────────────────────────
     print("\n[fetch] Yahoo Finance ---")
@@ -318,8 +312,7 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     out["hy_spread"]       = latest(out.get("hy_spread_series",       pd.Series(dtype=float)))
     out["debt_gdp_pct"]    = latest(out.get("debt_gdp_series",        pd.Series(dtype=float)))
 
-    # CPI YoY — NSA drives every downstream calculation (real_policy_rate,
-    # scorecard). SA computed alongside purely so the app can display both.
+    # CPI YoY
     cpi_raw = out.get("cpi_raw_series", pd.Series(dtype=float))
     if len(cpi_raw) >= 12:
         cpi_yoy = (cpi_raw.pct_change(12) * 100).dropna()
@@ -328,15 +321,6 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
         cpi_yoy = pd.Series(dtype=float)
     out["cpi_yoy_series"] = cpi_yoy
     out["cpi_yoy"]        = latest(cpi_yoy)
-
-    cpi_raw_sa = out.get("cpi_raw_sa_series", pd.Series(dtype=float))
-    if len(cpi_raw_sa) >= 12:
-        cpi_yoy_sa = (cpi_raw_sa.pct_change(12) * 100).dropna()
-        cpi_yoy_sa = cpi_yoy_sa[cpi_yoy_sa.index >= START]
-    else:
-        cpi_yoy_sa = pd.Series(dtype=float)
-    out["cpi_yoy_sa_series"] = cpi_yoy_sa
-    out["cpi_yoy_sa"]        = latest(cpi_yoy_sa)
 
     # Real policy rate
     ffr = out.get("fed_funds_series", pd.Series(dtype=float))
@@ -413,7 +397,7 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     # ── Final summary ──────────────────────────────────────────────────────────
     print("\n=== fetch_all_indicators complete ===")
     for k in ["treasury_10y", "treasury_2y", "treasury_30y",
-              "tips_real_yield", "breakeven", "fed_funds", "cpi_yoy", "cpi_yoy_sa",
+              "tips_real_yield", "breakeven", "fed_funds", "cpi_yoy",
               "real_policy_rate", "hy_spread", "debt_gdp_pct",
               "kre_current", "spy_latest",
               "bs_total_assets_latest", "bs_wow_change_bn"]:

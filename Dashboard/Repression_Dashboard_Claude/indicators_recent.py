@@ -90,8 +90,7 @@ def score_interest_gdp(pct: float | None) -> dict:
     }
 
 
-def score_real_policy_rate(rate: float | None, fed_funds: float | None, cpi: float | None,
-                           cpi_sa: float | None = None) -> dict:
+def score_real_policy_rate(rate: float | None, fed_funds: float | None, cpi: float | None) -> dict:
     if rate is None:
         return _unknown("Real interest rate (Fed funds − CPI)")
     status = "red" if rate <= 0 else "amber" if rate <= 1.5 else "green"
@@ -99,20 +98,16 @@ def score_real_policy_rate(rate: float | None, fed_funds: float | None, cpi: flo
     bar = _clamp(((2.0 - rate) / 4.0) * 100) if rate <= 2.0 else 10
     ffr_str = f"{fed_funds:.2f}%" if fed_funds else "N/A"
     cpi_str = f"{cpi:.1f}%" if cpi else "N/A"
-    sa_str  = f"{cpi_sa:.1f}%" if cpi_sa else "N/A"
     return {
         "name":      "Real interest rate (Fed funds − CPI)",
-        "sub":       f"Fed funds: {ffr_str} · CPI YoY (NSA): {cpi_str}  ·  SA (display only): {sa_str} · Repression = negative real rate",
+        "sub":       f"Fed funds: {ffr_str} · CPI YoY: {cpi_str} · Repression = negative real rate",
         "reading":   f"~{rate:+.2f}% {'⚠' if status == 'red' else ''}",
         "status":    status,
         "bar_pct":   bar,
         "bar_left":  f"Current: {rate:+.2f}%",
         "bar_right": "Trigger: 0%",
         "note": (
-            f"Real policy rate = {ffr_str} (Fed funds) minus {cpi_str} (CPI YoY, NSA — matches the "
-            f"officially-quoted headline figure) = {rate:+.2f}%. Seasonally-adjusted CPI YoY is "
-            f"{sa_str} for comparison; NOT used in this calculation, since CPIAUCSL's seasonal "
-            f"factors are re-revised annually and can drift from the quoted headline. "
+            f"Real policy rate = {ffr_str} (Fed funds) minus {cpi_str} (CPI YoY) = {rate:+.2f}%. "
             f"{'REPRESSION ACTIVE: real rates are negative — savers are being taxed by inflation.' if rate <= 0 else ''}"
             f"{'Marginally positive — approaching repression zone. New Fed chair (May 2026) expected to cut aggressively, which could flip this negative within 12–18 months.' if 0 < rate <= 1.5 else ''}"
             f"{'Real rates positive and comfortable — repression not yet active via rate channel.' if rate > 1.5 else ''}"
@@ -248,7 +243,6 @@ def build_scorecard(raw: dict) -> dict:
             raw.get("real_policy_rate"),
             raw.get("fed_funds"),
             raw.get("cpi_yoy"),
-            raw.get("cpi_yoy_sa"),
         ),
         score_tips_real_yield(raw.get("tips_real_yield")),
         score_fed_independence(),
@@ -323,9 +317,7 @@ CATALYSTS = [
 ]
 
 
-# ─── Static data: Watchlist (fallback / reference only) ───────────────────────
-# NOTE: app.py should call build_watchlist(raw) below for LIVE status.
-# This static list is kept only as a fallback if raw data is unavailable.
+# ─── Static data: Watchlist ───────────────────────────────────────────────────
 
 WATCHLIST = [
     {
@@ -337,8 +329,8 @@ WATCHLIST = [
     },
     {
         "title":       "Fed funds vs. CPI spread",
-        "freq":        "Monthly (CPI) · FRED: FEDFUNDS, CPIAUCNS",
-        "desc":        "Real policy rate = Fed funds minus CPI (NSA — matches the officially-quoted headline figure). When this turns negative after the new chair takes over, active repression has begun.",
+        "freq":        "Monthly (CPI) · FRED: FEDFUNDS, CPIAUCSL",
+        "desc":        "Real policy rate = Fed funds minus CPI. When this turns negative after the new chair takes over, active repression has begun.",
         "status":      "~+0.8% — watching",
         "status_class": "warn",
     },
@@ -371,60 +363,3 @@ WATCHLIST = [
         "status_class": "warn",
     },
 ]
-
-
-def build_watchlist(raw: dict) -> list[dict]:
-    """
-    LIVE watchlist: same schema/order as the static WATCHLIST above, but the
-    three data-backed rows (TIPS real yield, Fed funds/CPI spread, breakeven)
-    pull their status from `raw` using the SAME thresholds as the scorecard
-    functions, so the watchlist and scorecard can never silently disagree.
-
-    Event-driven rows with no numeric source in `raw` (Fed chair nomination,
-    term premium, SLR reform) are passed through unchanged from the static
-    list — there is nothing to compute for them.
-
-    If a value is missing from `raw` (fetch failed), falls back to the
-    static entry's text so the card never shows a blank/broken status.
-    """
-    out = [dict(w) for w in WATCHLIST]  # shallow copy, preserve order/schema
-
-    # ── Row 0: 10-yr TIPS real yield — thresholds match score_tips_real_yield
-    tips = raw.get("tips_real_yield")
-    if tips is not None:
-        if tips <= 0:
-            cls, label = "alert", "REPRESSION ACTIVE"
-        elif tips <= 1.0:
-            cls, label = "warn", "approaching"
-        else:
-            cls, label = "safe", "safe"
-        out[0]["status"] = f"{tips:.2f}% — {label}"
-        out[0]["status_class"] = cls
-
-    # ── Row 1: Fed funds vs. CPI spread — thresholds match score_real_policy_rate
-    rpr = raw.get("real_policy_rate")
-    if rpr is not None:
-        if rpr <= 0:
-            cls, label = "alert", "REPRESSION ACTIVE"
-        elif rpr <= 1.5:
-            cls, label = "warn", "watching"
-        else:
-            cls, label = "safe", "safe"
-        out[1]["status"] = f"{rpr:+.2f}% — {label}"
-        out[1]["status_class"] = cls
-
-    # Row 2 (Fed chair nomination): no numeric source — left static.
-
-    # ── Row 3: 10-yr breakeven inflation — thresholds match score_market_pricing
-    be = raw.get("breakeven")
-    if be is not None:
-        if be > 3.0:
-            cls, label = "warn", "elevated"
-        else:
-            cls, label = "safe", "calm"
-        out[3]["status"] = f"{be:.2f}% — {label}"
-        out[3]["status_class"] = cls
-
-    # Rows 4-5 (term premium, SLR reform): no numeric source in raw — static.
-
-    return out

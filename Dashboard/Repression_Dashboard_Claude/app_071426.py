@@ -23,7 +23,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 from data_fetcher import fetch_all_indicators, fetch_yf_series, fetch_fred, latest
-from indicators   import build_scorecard, build_watchlist, WATCHLIST, CATALYSTS
+from indicators   import build_scorecard, WATCHLIST, CATALYSTS
 
 # ── Regime classifier (two-real-yield engine) ─────────────────────────────────
 # Ships as sibling modules alongside data_fetcher.py / indicators.py.
@@ -1012,8 +1012,7 @@ def main():
                     unsafe_allow_html=True)
 
         w_cols = st.columns(3)
-        _live_watchlist = build_watchlist(raw)
-        for i, w in enumerate(_live_watchlist):
+        for i, w in enumerate(WATCHLIST):
             status_clr = {"safe": "#5a9e47", "warn": "#d4913a", "alert": "#e05252"}[w["status_class"]]
             badge_cls  = {"safe": "badge-green", "warn": "badge-amber", "alert": "badge-red"}[w["status_class"]]
             with w_cols[i % 3]:
@@ -1875,7 +1874,7 @@ ASSETS = [
             "Managed Total Return Fund to 8.4% avg annual return over 27 years."
         ),
         "signal_enter": "Real policy rate negative AND CPI > 4% — floaters beat all fixed-rate instruments",
-        "signal_exit":  "Fed begins hiking cycle in earnest — exit floaters, enter long nominal bonds",
+        "signal_exit":  "Fed signals the END of the hiking cycle (terminal rate in) — rotate floaters into long nominal bonds to lock the cycle-peak yield",
         "color": "#4a8fd4",
         "phase_color": "#185FA5",
     },
