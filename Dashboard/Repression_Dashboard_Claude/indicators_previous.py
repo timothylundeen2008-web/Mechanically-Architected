@@ -223,177 +223,6 @@ def score_market_pricing(breakeven: float | None, hy_spread: float | None) -> di
     }
 
 
-def score_dollar_divergence(dxy_20d_change_pct: float | None,
-                            tips_real_yield: float | None,
-                            treasury_10y: float | None,
-                            treasury_10y_series=None) -> dict:
-    """
-    Flags the specific pattern that matters for repression: real yields (or
-    nominal yields) RISING while the dollar FALLS. Normally higher US real
-    yields pull in foreign capital and support DXY — when that link breaks,
-    it means the term premium is being priced as a currency/debt-confidence
-    risk rather than a growth/inflation signal. This is a leading indicator,
-    not a lagging one, so it will sit quiet most of the time by design.
-    """
-    if dxy_20d_change_pct is None or tips_real_yield is None:
-        return _unknown("Dollar / real-yield divergence")
-
-    # 20-trading-day change in the 10-yr nominal yield, for context alongside
-    # the DXY momentum figure (both roughly 1-month windows).
-    yield_20d_chg = None
-    if treasury_10y_series is not None and len(treasury_10y_series) >= 21:
-        s = treasury_10y_series.dropna()
-        if len(s) >= 21:
-            yield_20d_chg = round(s.iloc[-1] - s.iloc[-21], 2)
-
-    diverging = (yield_20d_chg is not None and yield_20d_chg > 0.10
-                 and dxy_20d_change_pct < -1.0)
-
-    status = "red" if diverging else "amber" if (dxy_20d_change_pct < -1.5) else "green"
-    bar    = _clamp(50 - dxy_20d_change_pct * 10)
-
-    yield_str = f"{yield_20d_chg:+.2f}pp" if yield_20d_chg is not None else "N/A"
-
-    return {
-        "name":      "Dollar / real-yield divergence",
-        "sub":       f"DXY 20d: {dxy_20d_change_pct:+.1f}% · 10-yr yield 20d: {yield_str} "
-                     "· Alert: yields rising while DXY falls",
-        "reading":   f"DXY {dxy_20d_change_pct:+.1f}% (20d) {'⚠' if diverging else ''}",
-        "status":    status,
-        "bar_pct":   bar,
-        "bar_left":  f"DXY 20d: {dxy_20d_change_pct:+.1f}%",
-        "bar_right": "Watching for divergence",
-        "note": (
-            f"Dollar index (DXY) is {'up' if dxy_20d_change_pct >= 0 else 'down'} "
-            f"{abs(dxy_20d_change_pct):.1f}% over the last 20 trading days; the 10-yr Treasury "
-            f"yield has moved {yield_str} over the same window. "
-            + (
-                "DIVERGENCE FLAGGED: yields are rising while the dollar falls — the classic "
-                "sign that bond buyers are pricing debt-sustainability risk into the term "
-                "premium rather than growth or Fed-policy expectations, and that foreign "
-                "capital is not following the higher yield the way it normally would. "
-                "This is the pattern to watch for confirmation of a debt-driven, rather than "
-                "policy-driven, dollar weakening."
-                if diverging else
-                "No divergence currently — yields and the dollar are moving in their normal "
-                "relationship (both driven by the same Fed-policy/inflation expectations)."
-            )
-        ),
-        "weight": 1,
-        "score_contrib": 2 if diverging else 1 if dxy_20d_change_pct < -1.5 else 0,
-    }
-
-
-def score_gold_momentum_gate(gld_series=None,
-                             tips_real_yield: float | None = None,
-                             breakeven_series=None) -> dict:
-    """
-    Gold momentum gate: gold is treated as a repression-confirming signal
-    only when BOTH conditions hold —
-      1) the fundamental gate is open: real yields low/falling (< 1.5%) AND
-         breakeven inflation expectations rising (10d slope > 0), matching
-         the existing wealth-tab thesis text ("TIPS real yield < 1.5% AND
-         breakeven inflation rising — gold accelerates"), and
-      2) price is actually confirming: GLD's 50-day average is above its
-         200-day average (trend-following momentum gate).
-    Both gates open = repression thesis is being actively priced by the
-    gold market, not just a macro precondition sitting there unconfirmed.
-    """
-    if gld_series is None or len(gld_series) < 200 or tips_real_yield is None:
-        return _unknown("Gold momentum gate")
-
-    gld = gld_series.dropna()
-    ma50  = float(gld.tail(50).mean())
-    ma200 = float(gld.tail(200).mean())
-    price_confirmed = ma50 > ma200
-
-    be_rising = None
-    if breakeven_series is not None and len(breakeven_series.dropna()) >= 11:
-        be = breakeven_series.dropna()
-        be_rising = be.iloc[-1] > be.iloc[-11]
-
-    fundamental_open = (tips_real_yield < 1.5) and bool(be_rising)
-    both_open = fundamental_open and price_confirmed
-
-    if both_open:
-        status, label = "red", "GATE OPEN — confirmed"
-    elif fundamental_open or price_confirmed:
-        status, label = "amber", "partial — one gate open"
-    else:
-        status, label = "green", "gate closed"
-
-    bar = 90 if both_open else 50 if (fundamental_open or price_confirmed) else 10
-
-    be_str = ("rising" if be_rising else "flat/falling") if be_rising is not None else "N/A"
-
-    return {
-        "name":      "Gold momentum gate (fundamental + price confirmation)",
-        "sub":       f"Real yield: {tips_real_yield:.2f}% · Breakevens: {be_str} · "
-                     f"GLD 50d {'>' if price_confirmed else '<'} 200d MA",
-        "reading":   label,
-        "status":    status,
-        "bar_pct":   bar,
-        "bar_left":  "Fundamental gate",
-        "bar_right": "Price gate",
-        "note": (
-            f"Fundamental gate ({'OPEN' if fundamental_open else 'closed'}): TIPS real yield "
-            f"{tips_real_yield:.2f}% (needs < 1.5%) with breakevens {be_str} (needs rising). "
-            f"Price gate ({'OPEN' if price_confirmed else 'closed'}): GLD 50-day MA "
-            f"${ma50:.2f} vs. 200-day MA ${ma200:.2f}. "
-            + (
-                "BOTH GATES OPEN — the repression thesis is fundamentally supported AND the "
-                "gold market is actively confirming it with price trend. This is the strongest "
-                "form of the gold signal used elsewhere on this dashboard."
-                if both_open else
-                "Only one gate is open — either the macro precondition exists without price "
-                "confirmation yet, or price is trending up without the real-yield/breakeven "
-                "setup behind it (momentum without a repression driver)."
-                if (fundamental_open or price_confirmed) else
-                "Neither gate is open — no repression-driven gold signal at this time."
-            )
-        ),
-        "weight": 1,
-        "score_contrib": 2 if both_open else 1 if (fundamental_open or price_confirmed) else 0,
-    }
-
-
-def score_auction_demand(btc_latest: float | None, btc_avg4: float | None,
-                         security_label: str = "10-yr note") -> dict:
-    """
-    Treasury auction bid-to-cover ratio — a leading indicator of debt-
-    sustainability stress rather than a lagging confirmation. A bid-to-cover
-    consistently below ~2.2 on the 10-yr signals weakening demand; below 2.0
-    is a genuinely weak auction by modern standards.
-    """
-    if btc_latest is None:
-        return _unknown(f"Treasury auction demand ({security_label})")
-
-    status = "red" if btc_latest < 2.0 else "amber" if btc_latest < 2.3 else "green"
-    bar    = _clamp(((2.6 - btc_latest) / 1.0) * 100)
-    trend_str = f"{btc_avg4:.2f}" if btc_avg4 is not None else "N/A"
-
-    return {
-        "name":      f"Treasury auction demand ({security_label} bid-to-cover)",
-        "sub":       f"Latest: {btc_latest:.2f} · Trailing 4-auction avg: {trend_str} "
-                     "· Weak demand: < 2.2, stressed: < 2.0",
-        "reading":   f"{btc_latest:.2f} {'⚠' if status == 'red' else ''}",
-        "status":    status,
-        "bar_pct":   bar,
-        "bar_left":  f"Current: {btc_latest:.2f}",
-        "bar_right": "Healthy: 2.3+",
-        "note": (
-            f"Most recent {security_label} auction bid-to-cover ratio: {btc_latest:.2f} "
-            f"(trailing 4-auction average: {trend_str}). "
-            f"{'STRESSED: this is a genuinely weak auction — investors are demanding higher yields to absorb supply, a leading sign of debt-sustainability concern.' if btc_latest < 2.0 else ''}"
-            f"{'Softening demand — worth watching the next 2-3 auctions for confirmation.' if 2.0 <= btc_latest < 2.3 else ''}"
-            f"{'Healthy demand — no auction-driven stress signal currently.' if btc_latest >= 2.3 else ''}"
-            " Source: U.S. Treasury Fiscal Data API (auctions_query)."
-        ),
-        "weight": 1,
-        "score_contrib": 2 if btc_latest < 2.0 else 1 if btc_latest < 2.3 else 0,
-    }
-
-
 def _unknown(name: str) -> dict:
     return {
         "name": name, "sub": "Data unavailable",
@@ -425,25 +254,10 @@ def build_scorecard(raw: dict) -> dict:
         score_fed_independence(),
         score_structural_tools(),
         score_market_pricing(raw.get("breakeven"), raw.get("hy_spread")),
-        score_dollar_divergence(
-            raw.get("dxy_20d_change_pct"),
-            raw.get("tips_real_yield"),
-            raw.get("treasury_10y"),
-            raw.get("treasury_10y_series"),
-        ),
-        score_gold_momentum_gate(
-            raw.get("wealth_GLD_series"),
-            raw.get("tips_real_yield"),
-            raw.get("breakeven_series"),
-        ),
-        score_auction_demand(
-            raw.get("auction_10y_btc_latest"),
-            raw.get("auction_10y_btc_avg4"),
-        ),
     ]
 
     total_contrib = sum(i["score_contrib"] for i in indicators)
-    max_possible  = sum(i["weight"] for i in indicators)   # computed dynamically; was 13 before the dollar/gold/auction additions
+    max_possible  = sum(i["weight"] for i in indicators)   # = 13
     # Scale to 0-10
     overall = round((total_contrib / max_possible) * 10)
     overall = max(0, min(10, overall))
@@ -556,27 +370,6 @@ WATCHLIST = [
         "status":      "Monitor Fed releases",
         "status_class": "warn",
     },
-    {
-        "title":       "Dollar (DXY) vs. real-yield divergence",
-        "freq":        "Daily · Yahoo Finance DX-Y.NYB, FRED DGS10",
-        "desc":        "Watch for yields rising while DXY falls — bond buyers pricing debt-confidence risk rather than growth/Fed-policy expectations into the term premium.",
-        "status":      "Monitor daily",
-        "status_class": "warn",
-    },
-    {
-        "title":       "Gold momentum gate",
-        "freq":        "Daily · Yahoo Finance GLD, FRED DFII10/T10YIE",
-        "desc":        "Both the fundamental gate (real yield < 1.5% AND breakevens rising) and the price gate (GLD 50d MA > 200d MA) need to be open for gold to be a confirmed repression signal, not just a macro precondition.",
-        "status":      "Monitor daily",
-        "status_class": "warn",
-    },
-    {
-        "title":       "Treasury auction bid-to-cover",
-        "freq":        "Per auction (~monthly for 10-yr) · Treasury Fiscal Data API",
-        "desc":        "A leading indicator of debt-sustainability stress. Below 2.2 = weak demand; below 2.0 = genuinely stressed auction.",
-        "status":      "Monitor per auction",
-        "status_class": "warn",
-    },
 ]
 
 
@@ -633,56 +426,5 @@ def build_watchlist(raw: dict) -> list[dict]:
         out[3]["status_class"] = cls
 
     # Rows 4-5 (term premium, SLR reform): no numeric source in raw — static.
-
-    # ── Row 6: DXY vs real-yield divergence — thresholds match score_dollar_divergence
-    dxy_chg = raw.get("dxy_20d_change_pct")
-    if dxy_chg is not None:
-        t10_series = raw.get("treasury_10y_series")
-        yield_20d_chg = None
-        if t10_series is not None and len(t10_series.dropna()) >= 21:
-            s = t10_series.dropna()
-            yield_20d_chg = s.iloc[-1] - s.iloc[-21]
-        diverging = (yield_20d_chg is not None and yield_20d_chg > 0.10 and dxy_chg < -1.0)
-        if diverging:
-            cls, label = "alert", "DIVERGENCE FLAGGED"
-        elif dxy_chg < -1.5:
-            cls, label = "warn", "watching"
-        else:
-            cls, label = "safe", "normal"
-        out[6]["status"] = f"DXY {dxy_chg:+.1f}% (20d) — {label}"
-        out[6]["status_class"] = cls
-
-    # ── Row 7: Gold momentum gate — thresholds match score_gold_momentum_gate
-    tips = raw.get("tips_real_yield")
-    gld  = raw.get("wealth_GLD_series")
-    if tips is not None and gld is not None and len(gld.dropna()) >= 200:
-        g = gld.dropna()
-        price_confirmed = float(g.tail(50).mean()) > float(g.tail(200).mean())
-        be_series = raw.get("breakeven_series")
-        be_rising = None
-        if be_series is not None and len(be_series.dropna()) >= 11:
-            be = be_series.dropna()
-            be_rising = be.iloc[-1] > be.iloc[-11]
-        fundamental_open = (tips < 1.5) and bool(be_rising)
-        if fundamental_open and price_confirmed:
-            cls, label = "alert", "GATE OPEN"
-        elif fundamental_open or price_confirmed:
-            cls, label = "warn", "partial"
-        else:
-            cls, label = "safe", "closed"
-        out[7]["status"] = label
-        out[7]["status_class"] = cls
-
-    # ── Row 8: Treasury auction bid-to-cover — thresholds match score_auction_demand
-    btc = raw.get("auction_10y_btc_latest")
-    if btc is not None:
-        if btc < 2.0:
-            cls, label = "alert", "STRESSED"
-        elif btc < 2.3:
-            cls, label = "warn", "softening"
-        else:
-            cls, label = "safe", "healthy"
-        out[8]["status"] = f"{btc:.2f} — {label}"
-        out[8]["status_class"] = cls
 
     return out

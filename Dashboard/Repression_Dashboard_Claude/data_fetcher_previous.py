@@ -194,59 +194,6 @@ def fetch_fred_batch(series_dict: dict, api_key: str = "",
     return results
 
 
-def fetch_treasury_auctions(security_term_contains: str = "10-Year",
-                             n: int = 16,
-                             max_retries: int = 3) -> pd.DataFrame:
-    """
-    Live bid-to-cover ratio history from Treasury's public Fiscal Data API
-    (no key required). Filters to a given security term (e.g. "10-Year" for
-    notes, "30-Year" for bonds, "2-Year" for the short end) and returns the
-    most recent `n` auctions, oldest first.
-
-    Returns a DataFrame indexed by auction_date with columns:
-      security_term, high_yield, bid_to_cover_ratio
-    Empty DataFrame on failure — callers should treat that as "unavailable",
-    same convention as fetch_fred returning an empty Series.
-    """
-    url = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/auctions_query"
-    params = {
-        "fields": "auction_date,security_type,security_term,high_yield,bid_to_cover_ratio",
-        "filter": "security_type:eq:Note,bid_to_cover_ratio:gt:0",
-        "sort": "-auction_date",
-        "page[size]": "200",
-    }
-    for attempt in range(1, max_retries + 1):
-        try:
-            r = requests.get(url, params=params, headers=_HEADERS, timeout=30)
-            r.raise_for_status()
-            data = r.json().get("data", [])
-            if not data:
-                print(f"[auctions] empty response (attempt {attempt})")
-                continue
-            df = pd.DataFrame(data)
-            df = df[df["security_term"].str.contains(security_term_contains, na=False)]
-            df["auction_date"] = pd.to_datetime(df["auction_date"])
-            df["bid_to_cover_ratio"] = pd.to_numeric(df["bid_to_cover_ratio"], errors="coerce")
-            df["high_yield"] = pd.to_numeric(df["high_yield"], errors="coerce")
-            df = df.dropna(subset=["bid_to_cover_ratio"]).sort_values("auction_date")
-            df = df.set_index("auction_date").tail(n)
-            if len(df) > 0:
-                print(f"[auctions] {security_term_contains}: {len(df)} auctions, "
-                      f"latest B/C={df['bid_to_cover_ratio'].iloc[-1]:.2f} (attempt {attempt})")
-                return df[["security_term", "high_yield", "bid_to_cover_ratio"]]
-        except requests.exceptions.ReadTimeout:
-            wait = 2 ** attempt
-            print(f"[auctions] ReadTimeout attempt {attempt} — wait {wait}s")
-            if attempt < max_retries:
-                _time.sleep(wait)
-        except Exception as e:
-            print(f"[auctions] error attempt {attempt}: {type(e).__name__}: {e}")
-            if attempt < max_retries:
-                _time.sleep(1)
-    print(f"[auctions] all {max_retries} attempts failed for '{security_term_contains}'")
-    return pd.DataFrame(columns=["security_term", "high_yield", "bid_to_cover_ratio"])
-
-
 def latest(series: pd.Series) -> float | None:
     if series is None or len(series) == 0:
         return None
@@ -301,12 +248,11 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     # ── Step 2: Yahoo Finance tickers ─────────────────────────────────────────
     print("\n[fetch] Yahoo Finance ---")
     yf_tickers = {
-        "kre":  ("KRE",     "5y", 1.0),
-        "tnx":  ("^TNX",    "5y", 1.0),   # 10-yr live
-        "tyx":  ("^TYX",    "5y", 1.0),   # 30-yr live
-        "irx":  ("^IRX",    "5y", 10.0),  # 13-wk T-bill → divide by 10 for %
-        "spy":  ("SPY",     "5y", 1.0),
-        "dxy":  ("DX-Y.NYB","5y", 1.0),   # ICE US Dollar Index, live
+        "kre":  ("KRE",  "5y", 1.0),
+        "tnx":  ("^TNX", "5y", 1.0),   # 10-yr live
+        "tyx":  ("^TYX", "5y", 1.0),   # 30-yr live
+        "irx":  ("^IRX", "5y", 10.0),  # 13-wk T-bill → divide by 10 for %
+        "spy":  ("SPY",  "5y", 1.0),
     }
     yf_data = {}
     for label, (ticker, period, div) in yf_tickers.items():
@@ -327,34 +273,6 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
               / out["kre_52w_high"] * 100, 1)
         if out["kre_current"] and out["kre_52w_high"] else None
     )
-
-    # ── Step 3b: DXY (US Dollar Index) — live via Yahoo, with fallback ticker ──
-    dxy = yf_data["dxy"]
-    if len(dxy) == 0:
-        # DX-Y.NYB occasionally fails on Yahoo; ICE dollar index futures track
-        # the same underlying basket and rarely both fail at once.
-        print("[dxy] DX-Y.NYB empty, trying DX=F fallback")
-        dxy = fetch_yf_series("DX=F", period="5y")
-    out["dxy_series"]  = dxy
-    out["dxy_current"] = latest(dxy)
-    out["dxy_52w_high"] = (
-        float(dxy.tail(252).max()) if len(dxy) >= 252
-        else float(dxy.max())      if len(dxy) > 0
-        else None
-    )
-    out["dxy_52w_low"] = (
-        float(dxy.tail(252).min()) if len(dxy) >= 252
-        else float(dxy.min())      if len(dxy) > 0
-        else None
-    )
-    # 20-trading-day % change — short-term momentum used by the dollar-vs-real-yield
-    # divergence check in indicators.py
-    if len(dxy) >= 21:
-        out["dxy_20d_change_pct"] = round(
-            (dxy.iloc[-1] / dxy.iloc[-21] - 1) * 100, 2
-        )
-    else:
-        out["dxy_20d_change_pct"] = None
 
     # ── Step 4: Treasury yields (merge FRED history + Yahoo live) ─────────────
     # 10-yr
@@ -443,24 +361,6 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     out["deficit_gdp_pct"]  = 5.9
     out["interest_gdp_pct"] = 3.3
 
-    # ── Step 6b: Treasury auction demand (10-yr note bid-to-cover) ────────────
-    print("\n[fetch] Treasury auction bid-to-cover ---")
-    auctions_10y = fetch_treasury_auctions("10-Year", n=16)
-    out["auction_10y_df"] = auctions_10y
-    if len(auctions_10y) > 0:
-        out["auction_10y_btc_series"] = auctions_10y["bid_to_cover_ratio"]
-        out["auction_10y_btc_latest"] = float(auctions_10y["bid_to_cover_ratio"].iloc[-1])
-        if len(auctions_10y) >= 4:
-            out["auction_10y_btc_avg4"] = round(
-                float(auctions_10y["bid_to_cover_ratio"].tail(4).mean()), 2
-            )
-        else:
-            out["auction_10y_btc_avg4"] = None
-    else:
-        out["auction_10y_btc_series"] = pd.Series(dtype=float)
-        out["auction_10y_btc_latest"] = None
-        out["auction_10y_btc_avg4"]   = None
-
     # ── Step 7: H.4.1 Balance sheet unit conversions ──────────────────────────
     # WALCL, TREAST, WSHOMCB, WTREGEN, WRESBAL → millions → convert to T or B
     # RRPONTSYD → already in billions
@@ -515,8 +415,7 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
     for k in ["treasury_10y", "treasury_2y", "treasury_30y",
               "tips_real_yield", "breakeven", "fed_funds", "cpi_yoy", "cpi_yoy_sa",
               "real_policy_rate", "hy_spread", "debt_gdp_pct",
-              "kre_current", "spy_latest", "dxy_current", "dxy_20d_change_pct",
-              "auction_10y_btc_latest", "auction_10y_btc_avg4",
+              "kre_current", "spy_latest",
               "bs_total_assets_latest", "bs_wow_change_bn"]:
         v = out.get(k)
         print(f"  {k:30s}: {f'{v:.4f}' if isinstance(v, float) else v}")
