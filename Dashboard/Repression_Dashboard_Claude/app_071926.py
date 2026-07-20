@@ -436,7 +436,7 @@ def dollar_debt_gold_section(raw: dict):
          decoupling (yields up, dollar down = debt-confidence risk).
       2) Treasury 10-yr auction bid-to-cover trend — leading indicator of
          auction demand weakening.
-      3) Gold repression-confirmation gate status — fundamental gate (real yield/breakeven)
+      3) Gold momentum gate status — fundamental gate (real yield/breakeven)
          + price gate (GLD 50d/200d MA) combined readout.
     All three also feed the Scorecard tab via score_dollar_divergence(),
     score_auction_demand(), and score_gold_momentum_gate() in indicators.py.
@@ -447,7 +447,7 @@ def dollar_debt_gold_section(raw: dict):
         "Normally a higher US real yield pulls in foreign capital and supports the dollar. "
         "When yields rise while DXY falls, it's a sign the market is pricing debt-confidence "
         "risk into the term premium rather than growth or Fed policy. Auction demand and the "
-        "gold repression-confirmation gate are the confirming signals to watch alongside it."
+        "gold momentum gate are the confirming signals to watch alongside it."
         "</span>",
         unsafe_allow_html=True
     )
@@ -561,9 +561,9 @@ def dollar_debt_gold_section(raw: dict):
                 unsafe_allow_html=True
             )
 
-    # ── Gold repression-confirmation gate readout ─────────────────────────────────────────────
+    # ── Gold momentum gate readout ─────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**Gold repression-confirmation gate**")
+    st.markdown("**Gold momentum gate**")
 
     gld = raw.get("wealth_GLD_series", pd.Series(dtype=float))
     tips = raw.get("tips_real_yield")

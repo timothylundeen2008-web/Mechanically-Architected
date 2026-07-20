@@ -288,7 +288,7 @@ def score_gold_momentum_gate(gld_series=None,
                              tips_real_yield: float | None = None,
                              breakeven_series=None) -> dict:
     """
-    Gold repression-confirmation gate: gold is treated as a repression-confirming signal
+    Gold momentum gate: gold is treated as a repression-confirming signal
     only when BOTH conditions hold —
       1) the fundamental gate is open: real yields low/falling (< 1.5%) AND
          breakeven inflation expectations rising (10d slope > 0), matching
@@ -298,18 +298,9 @@ def score_gold_momentum_gate(gld_series=None,
          200-day average (trend-following momentum gate).
     Both gates open = repression thesis is being actively priced by the
     gold market, not just a macro precondition sitting there unconfirmed.
-
-    NOTE — this is intentionally a DIFFERENT signal from the "gold momentum
-    gate" defined in regime_classifier.py / the dashboard checklist, which
-    is a single condition (GLD above a RISING 200-day MA) used to arm the
-    +3 tactical GLD tilt in the All-Weather portfolio. That gate governs
-    real position sizing; this one is a scorecard/watchlist confirmation
-    signal for the repression thesis. They can disagree — that's expected,
-    not a bug — so the naming here is deliberately distinct to avoid the
-    two being conflated in a daily/weekly log.
     """
     if gld_series is None or len(gld_series) < 200 or tips_real_yield is None:
-        return _unknown("Gold repression-confirmation gate")
+        return _unknown("Gold momentum gate")
 
     gld = gld_series.dropna()
     ma50  = float(gld.tail(50).mean())
@@ -336,7 +327,7 @@ def score_gold_momentum_gate(gld_series=None,
     be_str = ("rising" if be_rising else "flat/falling") if be_rising is not None else "N/A"
 
     return {
-        "name":      "Gold repression-confirmation gate (fundamental + price)",
+        "name":      "Gold momentum gate (fundamental + price confirmation)",
         "sub":       f"Real yield: {tips_real_yield:.2f}% · Breakevens: {be_str} · "
                      f"GLD 50d {'>' if price_confirmed else '<'} 200d MA",
         "reading":   label,
@@ -573,7 +564,7 @@ WATCHLIST = [
         "status_class": "warn",
     },
     {
-        "title":       "Gold repression-confirmation gate",
+        "title":       "Gold momentum gate",
         "freq":        "Daily · Yahoo Finance GLD, FRED DFII10/T10YIE",
         "desc":        "Both the fundamental gate (real yield < 1.5% AND breakevens rising) and the price gate (GLD 50d MA > 200d MA) need to be open for gold to be a confirmed repression signal, not just a macro precondition.",
         "status":      "Monitor daily",
@@ -661,7 +652,7 @@ def build_watchlist(raw: dict) -> list[dict]:
         out[6]["status"] = f"DXY {dxy_chg:+.1f}% (20d) — {label}"
         out[6]["status_class"] = cls
 
-    # ── Row 7: Gold repression-confirmation gate — thresholds match score_gold_momentum_gate
+    # ── Row 7: Gold momentum gate — thresholds match score_gold_momentum_gate
     tips = raw.get("tips_real_yield")
     gld  = raw.get("wealth_GLD_series")
     if tips is not None and gld is not None and len(gld.dropna()) >= 200:
