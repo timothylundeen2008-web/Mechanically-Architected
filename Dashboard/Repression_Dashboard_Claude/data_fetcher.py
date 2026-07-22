@@ -247,6 +247,15 @@ def fetch_treasury_auctions(security_term_contains: str = "10-Year",
     return pd.DataFrame(columns=["security_term", "high_yield", "bid_to_cover_ratio"])
 
 
+# v2 PATCH (July 2026 cross-dashboard audit) — see fetch_all_indicators()
+# CPI YoY block: fixed a silent off-by-one-month bug in cpi_yoy / cpi_yoy_sa
+# caused by BLS's cancelled Oct-2025 CPI release colliding with a positional
+# (non-calendar-aware) pct_change(12). Confirmed against BLS's own published
+# index levels: bug produced 3.9% for June 2026 vs the true 3.5%. Every
+# real_policy_rate reading (and every scorecard point derived from it) from
+# November 2025 to this patch has been overstated toward "repression" by the
+# same mechanism. See PATCHES.md for the verification math.
+
 def latest(series: pd.Series) -> float | None:
     if series is None or len(series) == 0:
         return None
@@ -402,21 +411,35 @@ def fetch_all_indicators(fred_api_key: str = "") -> dict:
 
     # CPI YoY — NSA drives every downstream calculation (real_policy_rate,
     # scorecard). SA computed alongside purely so the app can display both.
+    #
+    # v2 PATCH (July 2026 audit): BLS CANCELLED the October 2025 CPI release
+    # outright (2025 shutdown — "BLS is unable to retroactively collect these
+    # data"), so CPIAUCNS/CPIAUCSL have a genuine missing row, not a NaN gap.
+    # A raw .pct_change(12) is POSITIONAL, not calendar-aware: with one row
+    # gone, every point from Nov 2025 onward silently compares against a base
+    # month ONE MONTH TOO EARLY. Verified against BLS's own published index
+    # levels: this bug computed a Jun-2026 YoY of 3.9% against a true,
+    # BLS-confirmed 3.5% (compares Jun-2026 vs May-2025 instead of Jun-2025).
+    # Fix: resample to a COMPLETE calendar-month index first (inserting an
+    # explicit NaN for the missing Oct-2025 slot) so position i is always i
+    # calendar months from the start, then pct_change(12) is safe again.
+    # This is the same pattern regime_classifier.py already uses for its own
+    # CPI calc (resample("ME").last() before pct_change) — that file was
+    # never affected by this bug; this fetcher was the only place missing it.
+    def _safe_yoy(raw: pd.Series) -> pd.Series:
+        if len(raw) < 13:
+            return pd.Series(dtype=float)
+        complete = raw.resample("MS").asfreq()  # explicit NaN for gap months
+        yoy = (complete.pct_change(12) * 100).dropna()
+        return yoy[yoy.index >= START]
+
     cpi_raw = out.get("cpi_raw_series", pd.Series(dtype=float))
-    if len(cpi_raw) >= 12:
-        cpi_yoy = (cpi_raw.pct_change(12) * 100).dropna()
-        cpi_yoy = cpi_yoy[cpi_yoy.index >= START]
-    else:
-        cpi_yoy = pd.Series(dtype=float)
+    cpi_yoy = _safe_yoy(cpi_raw)
     out["cpi_yoy_series"] = cpi_yoy
     out["cpi_yoy"]        = latest(cpi_yoy)
 
     cpi_raw_sa = out.get("cpi_raw_sa_series", pd.Series(dtype=float))
-    if len(cpi_raw_sa) >= 12:
-        cpi_yoy_sa = (cpi_raw_sa.pct_change(12) * 100).dropna()
-        cpi_yoy_sa = cpi_yoy_sa[cpi_yoy_sa.index >= START]
-    else:
-        cpi_yoy_sa = pd.Series(dtype=float)
+    cpi_yoy_sa = _safe_yoy(cpi_raw_sa)
     out["cpi_yoy_sa_series"] = cpi_yoy_sa
     out["cpi_yoy_sa"]        = latest(cpi_yoy_sa)
 
