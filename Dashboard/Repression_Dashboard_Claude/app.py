@@ -129,6 +129,70 @@ st.markdown("""
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
+def _resolve_fred_key() -> str:
+    """
+    Streamlit secrets FIRST, then the environment.
+
+    All three call sites here previously used os.environ.get("FRED_API_KEY","")
+    alone. Streamlit Cloud does expose TOP-LEVEL secrets as environment
+    variables, so that works for a flat `FRED_API_KEY = "..."` — but it returns
+    "" the moment the key is nested under a TOML section, and it bypasses
+    st.secrets entirely. The All-Weather repo resolves through
+    fred_client.get_api_key(); this repo had three stragglers. Same
+    patch-all-consumers class as the flow_score and curve_signal misses.
+    """
+    try:
+        if "FRED_API_KEY" in st.secrets:
+            v = str(st.secrets["FRED_API_KEY"]).strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return os.environ.get("FRED_API_KEY", "").strip()
+
+
+def _verdict_subtext(overall, raw: dict) -> str:
+    """
+    Templated from live data.
+
+    The previous string was frozen and asserted that the Fed-chair transition
+    was still PENDING — "the operational trigger arrives May 2026 with the new
+    Fed chair appointment". Warsh took office in May 2026, and by the July
+    meeting the FOMC had produced three dissents in favour of a HIKE. The
+    dashboard's top-line verdict was advertising a catalyst that had already
+    fired, in the opposite direction to the one it warned about.
+    """
+    rpr = raw.get("real_policy_rate")
+    tips = raw.get("tips_real_yield")
+    bits = ["Every long-run structural precondition for financial repression "
+            "remains in place — debt, deficit and net interest are all past "
+            "their thresholds."]
+
+    if rpr is None:
+        bits.append("The short real policy rate is unavailable, so the primary "
+                    "gauge cannot be read — this is a DEGRADED verdict, not a "
+                    "benign one.")
+    elif rpr < -0.25:
+        bits.append(f"The short real policy rate is {rpr:+.2f}% — the front-end "
+                    f"liquidation channel is OPEN.")
+    elif rpr > 0.25:
+        bits.append(f"The short real policy rate is {rpr:+.2f}% — savers are "
+                    f"being paid a real return and the primary repression "
+                    f"gauge is currently OFF.")
+    else:
+        bits.append(f"The short real policy rate is {rpr:+.2f}%, inside the "
+                    f"\u00b10.25% transition band — the primary gauge is not "
+                    f"giving a directional reading, so no sign-dependent "
+                    f"regime can be confirmed.")
+
+    if tips is not None and tips > 1.0:
+        bits.append(f"DFII10 at {tips:.2f}% is far above the sub-1% level every "
+                    f"historical repression episode required: the long end is "
+                    f"demanding term and fiscal risk premium, not being "
+                    f"suppressed.")
+    return " ".join(bits)
+
+
 def color_hex(status: str) -> str:
     return {"red": "#e05252", "amber": "#d4913a", "green": "#5a9e47"}.get(status, "#9aa3b2")
 
@@ -252,7 +316,7 @@ def _fetch_fred_inline(series_id: str, start_date: str = "2000-01-01") -> pd.Ser
     if cache_key in st.session_state:
         return st.session_state[cache_key]
 
-    fred_key = os.environ.get("FRED_API_KEY", "")
+    fred_key = _resolve_fred_key()
     try:
         s = fetch_fred(series_id, fred_key, start_date)
     except Exception:
@@ -757,7 +821,7 @@ def main():
     st.markdown("---")
 
     # ── FRED API key notice ────────────────────────────────────────────────────
-    fred_key = os.environ.get("FRED_API_KEY", "")
+    fred_key = _resolve_fred_key()
     if not fred_key:
         st.info(
             "💡 **Optional:** Set a `FRED_API_KEY` environment variable for higher rate limits. "
@@ -844,11 +908,7 @@ def main():
         st.markdown(
             f'<div class="score-card">'
             f'<div class="score-verdict">{"STRUCTURALLY PRIMED — MECHANISTICALLY INCOMPLETE" if overall >= 6 else "ELEVATED" if overall >= 4 else "LOW RISK"}</div>'
-            f'<div class="score-sub">'
-            f'Every long-run structural precondition for financial repression is in place. '
-            f'The operational trigger arrives May 2026 with the new Fed chair appointment — '
-            f'the most important inflection point for repression risk in a generation.'
-            f'</div>'
+            f'<div class="score-sub">{_verdict_subtext(overall, raw)}</div>'
             f'<br>'
             f'<span style="margin-right:16px;">🔴 <b>{triggered}</b> breached</span>'
             f'<span style="margin-right:16px;">🟡 <b>{watching}</b> watching</span>'
@@ -1176,15 +1236,27 @@ def main():
         st.markdown('<p class="sec-label">Key catalysts — what to watch and when</p>',
                     unsafe_allow_html=True)
 
-        for cat in CATALYSTS:
-            dot_class = "tl-dot-r" if cat["urgency"] == "high" else "tl-dot-a"
-            symbol    = "!" if cat["urgency"] == "high" else "~"
+        # v3: fired catalysts are demoted rather than left advertising
+        # themselves. The Fed-chair entry rendered at urgency "high" with
+        # "watch confirmation hearings closely" three months after Warsh took
+        # office — and it resolved hawkish, the opposite of what it warned of.
+        try:
+            from indicators import split_catalysts
+            pending, resolved = split_catalysts()
+        except Exception:
+            pending, resolved = list(CATALYSTS), []
+
+        def _tl_item(cat, muted=False):
+            dot_class = ("tl-dot-a" if muted else
+                         "tl-dot-r" if cat["urgency"] == "high" else "tl-dot-a")
+            symbol = "\u2713" if muted else ("!" if cat["urgency"] == "high" else "~")
+            body = cat.get("resolution") or cat["desc"]
             st.markdown(
-                f'<div class="tl-item">'
+                f'<div class="tl-item" style="{"opacity:.6;" if muted else ""}">'
                 f'<div class="{dot_class}">{symbol}</div>'
                 f'<div>'
                 f'  <div class="tl-title">{cat["title"]}</div>'
-                f'  <div class="tl-desc">{cat["desc"]}</div>'
+                f'  <div class="tl-desc">{body}</div>'
                 f'</div>'
                 f'</div>',
                 unsafe_allow_html=True
@@ -1193,6 +1265,21 @@ def main():
                 '<div style="height:1px;background:#242830;margin:0 0 0 34px;"></div>',
                 unsafe_allow_html=True
             )
+
+        if not pending:
+            st.info("No pending catalysts on the timeline. Add forward-dated "
+                    "entries to CATALYSTS in indicators.py.")
+        for cat in pending:
+            _tl_item(cat)
+
+        if resolved:
+            with st.expander(f"\u2713 Resolved catalysts ({len(resolved)}) — "
+                             f"what actually happened", expanded=False):
+                st.caption("These fired. Their outcome is shown instead of the "
+                           "original watch-instructions, so a resolved event "
+                           "cannot keep presenting itself as pending.")
+                for cat in resolved:
+                    _tl_item(cat, muted=True)
 
     # ── TAB 4: DAILY WATCHLIST ─────────────────────────────────────────────────
     with tab4:
@@ -1320,7 +1407,7 @@ def fed_balance_sheet_tab(raw: dict):
     # ── If no H.4.1 data at all, attempt inline fetch on the spot ─────────────
     if not fetch_status or len(loaded_bs) == 0:
         st.info("⏳ Fetching H.4.1 balance sheet data from FRED…")
-        fred_key = os.environ.get("FRED_API_KEY", "")
+        fred_key = _resolve_fred_key()
 
         def _bs_inline(series_id, divisor):
             s = fetch_fred(series_id, fred_key, "2019-01-01")

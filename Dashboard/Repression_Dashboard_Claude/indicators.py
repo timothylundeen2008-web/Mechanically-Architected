@@ -148,29 +148,69 @@ def score_tips_real_yield(yld: float | None) -> dict:
 
 
 def score_fed_independence() -> dict:
-    """Static scoring — Fed chair succession is event-based."""
+    """
+    STATIC / EDITORIAL — this indicator takes no arguments and cannot move on
+    data. It is tagged source="static" so the UI can distinguish it from the
+    nine live feeds.
+
+    ⚠ EDITORIAL JUDGEMENT, REVIEW BEFORE TRUSTING ⚠
+    v3 rewrite. The previous text scored this RED at 90% on the premise that
+    Powell's succession was pending and the nominee was "expected to be
+    dovish", with advice to watch confirmation hearings. That premise resolved,
+    and it resolved in the OPPOSITE direction:
+
+      * Warsh took office in May 2026.
+      * The target range has been HELD at 3.50–3.75%.
+      * The July 2026 meeting produced three dissents in favour of a HIKE —
+        the first unified three-way directional dissent since September 2016.
+      * Forward guidance has been abandoned, which is a hawkish-optionality
+        posture, not a dovish-capture one.
+
+    A 90% red reading on an anticipated dovish capture that did not occur was
+    inflating the repression score through a channel that has since closed.
+    The STRUCTURAL risk — political pressure on the central bank, and the fact
+    that a future chair could still be captured — is real and standing, so this
+    is amber rather than green, and the contribution drops from 1 to 0.5 of a
+    weight-2 indicator.
+
+    If you disagree with this recalibration, change it here — but do not leave
+    the original text in place, because it describes a future that already
+    happened differently.
+    """
     return {
         "name":      "Fed independence (chair succession)",
-        "sub":       "Powell term ends May 2026 · Trump nominee expected to be dovish · 'Litmus test' for rate cuts",
-        "reading":   "High risk ⚠",
-        "status":    "red",
-        "bar_pct":   90,
-        "bar_left":  "Risk level: High",
-        "bar_right": "Trigger: Chair confirmed",
+        "sub":       "Warsh in office since May 2026 · range held at 3.50–3.75% · "
+                     "three July dissents FOR a hike · forward guidance abandoned",
+        "reading":   "Structural risk standing; near-term capture did NOT occur",
+        "status":    "amber",
+        "bar_pct":   45,
+        "bar_left":  "Risk level: Moderate",
+        "bar_right": "Trigger: dovish pivot / political override",
+        "source":    "static",
         "note": (
-            "Powell's term as Fed chair ends May 2026. Trump has stated immediate rate cuts are a "
-            "'litmus test' for his nominee. Markets are already pricing more dovish policy in H2 2026. "
-            "A new chair pushing the terminal rate below 3% would flip real rates negative and "
-            "activate repression. This is the most important near-term event to monitor. "
-            "Watch: confirmation hearing language on 'neutral rate' and 'r-star'."
+            "RESOLVED HAWKISH, contrary to the scenario this indicator was "
+            "written to warn about. Warsh has held policy and tolerated three "
+            "dissents in favour of hiking. The near-term dovish-capture "
+            "channel into repression is therefore CLOSED for now. What remains "
+            "is structural: the fiscal arithmetic still argues for eventual "
+            "accommodation, and a chair who refuses forward guidance retains "
+            "maximum freedom to pivot without warning. "
+            "Watch: Jackson Hole (27–29 Aug 2026) — with guidance abandoned, "
+            "that symposium is functionally this cycle's guidance event."
         ),
         "weight": 2,
-        "score_contrib": 1,  # partial — event hasn't occurred yet
+        "score_contrib": 0.5,   # structural risk only; the event resolved hawkish
     }
 
 
 def score_structural_tools() -> dict:
-    """Static scoring — SLR reform / regulatory tools."""
+    """
+    STATIC / EDITORIAL — takes no arguments, cannot move on data. Tagged
+    source="static" so the UI can separate it from the live feeds. Together
+    with score_fed_independence() this is 3 of the 16 available points that
+    are a judgement rather than a measurement; review both when the framework
+    is revisited.
+    """
     return {
         "name":      "Structural repression tools (SLR reform, QE framework)",
         "sub":       "Regulatory machinery being assembled to force bank Treasury purchases",
@@ -179,6 +219,7 @@ def score_structural_tools() -> dict:
         "bar_pct":   60,
         "bar_left":  "Assembly: ~60%",
         "bar_right": "Trigger: SLR enacted",
+        "source":    "static",
         "note": (
             "SLR (Supplementary Leverage Ratio) exemption reforms under discussion would force banks "
             "to absorb Treasuries at below-market rates — the post-WWII Regulation Q equivalent. "
@@ -451,15 +492,64 @@ def build_scorecard(raw: dict) -> dict:
         ),
     ]
 
+    import score_meta
+
     total_contrib = sum(i["score_contrib"] for i in indicators)
-    max_possible  = sum(i["weight"] for i in indicators)   # computed dynamically; was 13 before the dollar/gold/auction additions
-    # Scale to 0-10
-    overall = round((total_contrib / max_possible) * 10)
-    overall = max(0, min(10, overall))
+
+    # PINNED denominator (v3). This previously summed the live weight list, so
+    # the scale moved whenever the indicator set changed — the in-code comment
+    # already recorded one such move ("was 13 before the dollar/gold/auction
+    # additions"). The consequence was not cosmetic:
+    #
+    #     Add ONE indicator of weight 1 that currently scores 0.
+    #     Denominator 15 -> 16. Contribution unchanged at 7.
+    #     Score 4.67 -> 4.38. Rounds 5 -> 4.
+    #     Band flips "Moderate repression" -> "Tightening cycle".
+    #     The dashboard now says to REDUCE the tilt. Nothing happened in
+    #     the market.
+    #
+    # The score exists to answer HOW HARD to tilt, so a scale that moves for
+    # non-market reasons moves the tilt for non-market reasons. See
+    # score_meta.py: the denominator is pinned per SCORE_VERSION, every logged
+    # row carries its version, and adding indicators means bumping the version
+    # rather than silently recalibrating every historical reading.
+    scaled = score_meta.scale(total_contrib)
+    overall = scaled["scaled_int"]
+
+    # Drift alarm: if the live weight list no longer matches the pinned
+    # denominator, someone added an indicator without bumping SCORE_VERSION.
+    runtime_max = sum(i["weight"] for i in indicators)
+    denominator_drift = (runtime_max != scaled["max_possible"])
+
+    # Which indicators are editorial constants rather than live feeds. Both
+    # score_fed_independence() and score_structural_tools() take no arguments,
+    # so they contribute to numerator AND denominator while being unable to
+    # move. Defensible — structural tools genuinely are structural — but it has
+    # to be labelled, or a reader assumes all eleven are live data.
+    # The two editorial indicators tag themselves with source="static"; every
+    # other indicator is a live feed by definition.
+    for i in indicators:
+        i.setdefault("source", "live")
+    static_names = sorted(i["name"] for i in indicators
+                          if i.get("source") == "static")
 
     return {
         "indicators":    indicators,
         "overall_score": overall,
+        "score_scaled":  scaled["scaled_exact"],
+        "score_version": scaled["version"],
+        "max_possible":  scaled["max_possible"],
+        "raw_contrib":   total_contrib,
+        "score_display": scaled["display"],
+        "static_indicators": static_names,
+        "static_share_pct": scaled["static_share_pct"],
+        "denominator_drift": denominator_drift,
+        "drift_warning": (
+            f"SCORE_VERSION '{scaled['version']}' pins max_possible="
+            f"{scaled['max_possible']} but the live indicator list sums to "
+            f"{runtime_max}. Add a VERSIONS entry in score_meta.py and bump "
+            f"CURRENT_VERSION — do not let the denominator float."
+            if denominator_drift else ""),
         "triggered":     sum(1 for i in indicators if i["status"] == "red"),
         "watching":      sum(1 for i in indicators if i["status"] == "amber"),
         "clear":         sum(1 for i in indicators if i["status"] == "green"),
@@ -468,9 +558,47 @@ def build_scorecard(raw: dict) -> dict:
 
 # ─── Static data: Catalysts ───────────────────────────────────────────────────
 
+def split_catalysts(catalysts=None, today=None):
+    """
+    (pending, resolved). An entry with no `date` stays PENDING — fail toward
+    showing a catalyst rather than silently hiding it.
+
+    Call this before rendering the timeline so a fired catalyst is demoted to a
+    collapsed "resolved" section instead of continuing to advertise itself as
+    the most important upcoming event.
+    """
+    import datetime as _d
+    cats = CATALYSTS if catalysts is None else catalysts
+    today = today or _d.date.today()
+    pending, resolved = [], []
+    for c in cats:
+        d = c.get("date")
+        try:
+            fired = bool(d) and _d.date.fromisoformat(d) < today
+        except Exception:
+            fired = False
+        (resolved if fired else pending).append(c)
+    return pending, resolved
+
+
+# v3: every catalyst now carries a `date`, and split_catalysts() demotes any
+# entry whose date has passed. The Fed-chair entry below was rendering at
+# urgency "high" with advice to "watch confirmation hearings closely" three
+# months AFTER Warsh took office — and by the July 2026 meeting the FOMC had
+# produced three dissents in favour of a HIKE, the first unified three-way
+# directional dissent since September 2016. The catalyst did not merely fire;
+# it resolved HAWKISH, the opposite of the dovish scenario the entry warned of.
 CATALYSTS = [
     {
         "urgency": "high",
+        "date":    "2026-05-01",
+        "resolution": (
+            "RESOLVED HAWKISH. Warsh took office in May 2026 and has held the "
+            "target range at 3.50–3.75%. The July 2026 meeting produced three "
+            "dissents in favour of a HIKE — the first unified three-way "
+            "directional dissent since September 2016 — and forward guidance "
+            "has been abandoned. The dovish-capture scenario this entry was "
+            "written to warn about did not occur."),
         "title":   "May 2026 — New Fed chair takes office",
         "desc":    (
             "The single most important near-term event. If the nominee is dovish (Hassett or similar), "
