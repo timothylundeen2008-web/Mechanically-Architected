@@ -458,30 +458,14 @@ def repression_score(sig: SignalSet,
     # state from a 5 that includes them, and the band label alone hides it.
     top_earned, top_total = 0, 4
 
-    # v3.1 fix: use the BAND, not a raw sign test, for this component too.
-    # classify_regime() already treats |short_real| < 0.25% as its own
-    # AMBIGUOUS state and holds the regime label stable through it. This
-    # scoring component did not -- a live tick from +0.10% to -0.10% (noise
-    # well inside the band, nothing real changed) flipped the score from
-    # 4/10 "hollow" to 6/10 "Moderate repression" while the regime banner
-    # stayed at transition_ambiguous the whole time. A score meant to answer
-    # "how hard to tilt" should not swing on sub-basis-point noise while the
-    # regime call it is supposed to be consistent with does not move.
-    _srr_band = _rb.short_real_band(sig.short_real_rate)
     if sig.short_real_rate is None:
         missing.append("short real rate")
-    elif _srr_band["state"] == _rb.BAND_NEGATIVE:
+    elif sig.short_real_rate < 0:
         pts += 2; top_earned += 2
-        reasons.append(f"Short real rate {sig.short_real_rate:+.2f}% "
-                       f"(decisively negative, beyond \u00b1{_srr_band['band']:.2f}%) (+2)")
-    elif _srr_band["state"] == _rb.BAND_AMBIGUOUS:
-        reasons.append(f"Short real rate {sig.short_real_rate:+.2f}% is INSIDE "
-                       f"the \u00b1{_srr_band['band']:.2f}% transition band (+0) "
-                       f"\u2014 no point either way; this is noise, not a signal")
+        reasons.append(f"Short real rate {sig.short_real_rate:+.2f}% (+2)")
     else:
-        reasons.append(f"Short real rate {sig.short_real_rate:+.2f}% "
-                       f"(decisively positive) NOT negative (+0) \u2014 primary "
-                       f"repression gauge is OFF")
+        reasons.append(f"Short real rate {sig.short_real_rate:+.2f}% NOT negative "
+                       f"(+0) \u2014 primary repression gauge is OFF")
 
     if sig.long_real_yield is None:
         missing.append("DFII10 level")
@@ -561,9 +545,7 @@ def repression_score(sig: SignalSet,
 # --------------------------------------------------------------------------- #
 #  The regime classifier (5 quadrants + neutral)
 # --------------------------------------------------------------------------- #
-def classify_regime(sig: SignalSet, fetch_prices: Callable = None,
-                    cape: float = None,
-                    top20_concentration_pct: float = None) -> dict:
+def classify_regime(sig: SignalSet, fetch_prices: Callable = None) -> dict:
     """Return the regime key, label, blurb, and drivers list.
 
     Precedence (deliberate):
@@ -634,22 +616,6 @@ def classify_regime(sig: SignalSet, fetch_prices: Callable = None,
     #    on 2026-07-29 and its overlay (VGT +4, QQQ +3, SMH +2) instructed
     #    adding to the exact complex that was unwinding.
     if short_pos and hy is not None and hy < 3.5:
-        # v3.2 FIX 11: valuation/concentration circuit breaker. The leadership
-        # guard below catches a crash IN PROGRESS; it cannot catch
-        # expensive-and-euphoric. On 2026-08-07 QQQ was at record highs (guard
-        # passes) with CAPE 42.19 and the top 20 names at 50.8% of index
-        # weight. A cool CPI print pushing the short real rate above +0.25%
-        # would have fired goldilocks and instructed ADDING growth
-        # (VGT +4, QQQ +3, SMH +2) at the second-highest valuation in ~150
-        # years. Fails OPEN on missing inputs — see regime_bands.valuation_ok.
-        val_ok, val_why = _rb.valuation_ok(cape, top20_concentration_pct)
-        if not val_ok:
-            drivers.append(f"Short real rate {short_real:+.2f}% (positive)")
-            drivers.append(f"HY OAS {hy:.2f}% (tight credit)")
-            drivers.append(val_why)
-            return _regime("transition_ambiguous", drivers)
-        drivers.append(val_why)
-
         if fetch_prices is not None:
             lead_ok, lead_why = _rb.leadership_ok(fetch_prices)
             if not lead_ok:
@@ -809,8 +775,6 @@ def kmlm_signal(sig: SignalSet) -> dict:
 def full_assessment(fred_api_key: str = "",
                     fed_bs_expanding: Optional[bool] = None,
                     deficit_gt_5pct_gdp: Optional[bool] = None,
-                    cape: Optional[float] = None,
-                    top20_concentration_pct: Optional[float] = None,
                     **kw) -> dict:
     """
     v3 FIX 10. Two changes, both of which were silently degrading the output:
@@ -830,8 +794,7 @@ def full_assessment(fred_api_key: str = "",
     """
     fetch_prices = kw.get("fetch_prices")
     sig = compute_signals(fred_api_key, **kw)
-    regime = classify_regime(sig, fetch_prices=fetch_prices, cape=cape,
-                             top20_concentration_pct=top20_concentration_pct)
+    regime = classify_regime(sig, fetch_prices=fetch_prices)
     return {
         "signals": sig,
         "regime": regime,
