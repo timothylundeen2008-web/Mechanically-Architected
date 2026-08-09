@@ -863,20 +863,9 @@ def main():
     indicators = scorecard["indicators"]
 
     # ── Top KPI row ────────────────────────────────────────────────────────────
-    # ET, with an explicit zone label. fromtimestamp() without a tz returns
-    # SERVER-local time — UTC on Streamlit Community Cloud — so this card
-    # previously showed a timestamp 4-5 hours off from what a US reader
-    # assumed, on a dashboard whose entire staleness discipline depends on
-    # knowing when a number was captured.
-    try:
-        import market_time as _mt
-        updated_str = _mt.fmt_et(
-            datetime.datetime.fromtimestamp(
-                st.session_state.get(cache_ts, now), datetime.timezone.utc))
-    except Exception:
-        updated_str = datetime.datetime.fromtimestamp(
-            st.session_state.get(cache_ts, now)
-        ).strftime("%b %d, %Y  %I:%M %p")
+    updated_str = datetime.datetime.fromtimestamp(
+        st.session_state.get(cache_ts, now)
+    ).strftime("%b %d, %Y  %I:%M %p")
 
     kpi_cols = st.columns([2, 2, 2, 2, 3])
     kpis = [
