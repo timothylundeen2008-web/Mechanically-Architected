@@ -935,44 +935,12 @@ def main():
     )
 
     # ── TAB 7: REGIME CLASSIFIER ──────────────────────────────────────────────
-    # MANUAL MACRO FLAGS — this call site had NEVER received these, on either
-    # pair. Two separate gaps closed here at once:
-    #
-    #   fed_bs_expanding / deficit_gt_5pct_gdp
-    #       Added to Portfolio-Tracker's checklist_tab.py months ago but never
-    #       propagated to this repo's own call site. Consequence: both flags
-    #       sat permanently in repression_score()'s missing[] list here, and
-    #       the live score was structurally capped below its true value on
-    #       THIS dashboard specifically, even after the fix shipped elsewhere.
-    #
-    #   cape / top20_concentration_pct
-    #       New. Arms the goldilocks valuation/concentration guard. Without
-    #       these, the guard fails open (by design) and reports "not
-    #       supplied — not evaluated" — which is exactly what surfaced this
-    #       gap. Not hypothetical: CAPE was 42 as of 2026-08-10, above the
-    #       guard's own 40.0 block level, while goldilocks was firing here
-    #       unguarded.
-    #
-    # Review and update these dates whenever the underlying facts change —
-    # CAPE monthly at minimum, concentration quarterly is sufficient.
-    FED_BS_EXPANDING = True
-    DEFICIT_GT_5PCT_GDP = True
-    CAPE_CURRENT = 42.0                  # multpl.com, 2026-08-10
-    TOP20_CONCENTRATION_PCT = 50.8       # JPMorgan, cited 2026-08-07 review
-    MACRO_FLAGS_REVIEWED = "2026-08-13"
-
     # Adapter bridges this app's 2-arg _fetch_fred_inline(series_id, start_date)
     # to the classifier's expected fetch_fred(series_id, api_key, start_date).
     with tab7:
         def _fred_adapter(series_id, api_key, start_date="2015-01-01"):
             return _fetch_fred_inline(series_id, start_date)
-        render_regime_section(
-            fred_key, fetch_fred=_fred_adapter,
-            fed_bs_expanding=FED_BS_EXPANDING,
-            deficit_gt_5pct_gdp=DEFICIT_GT_5PCT_GDP,
-            cape=CAPE_CURRENT,
-            top20_concentration_pct=TOP20_CONCENTRATION_PCT,
-        )
+        render_regime_section(fred_key, fetch_fred=_fred_adapter)
 
     # ── TAB 1: SCORECARD ──────────────────────────────────────────────────────
     with tab1:
