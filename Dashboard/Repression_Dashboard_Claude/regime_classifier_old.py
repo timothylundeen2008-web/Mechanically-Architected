@@ -72,7 +72,7 @@ Public API is unchanged and backward compatible:
 
 FRED series used:
   DFF          Effective Federal Funds Rate (daily)
-  CPIAUCNS     CPI, not seasonally adjusted (index; YoY computed here)
+  CPIAUCSL     CPI (index; YoY computed here)
   DFII10       10y TIPS real yield
   T10YIE       10y breakeven inflation
   DGS10, DGS2  nominal 10y / 2y (for 2s10s)
@@ -102,20 +102,7 @@ import regime_bands as _rb
 
 FRED_SERIES = {
     "eff_funds": "DFF",
-    # v3.4 fix. Was CPIAUCSL (seasonally adjusted). BLS's own headline YoY
-    # figure -- the "3.4%" quoted in every release and every news article --
-    # is ALWAYS computed from the NOT-seasonally-adjusted series: "rose 3.4
-    # percent over the last 12 months, not seasonally adjusted (NSA)"
-    # (bls.gov/cpi/). CPIAUCSL is explicitly the seasonally-adjusted series
-    # per FRED's own series description. SA and NSA 12-month changes commonly
-    # diverge by ~0.1pp after seasonal-factor revisions -- this was masked
-    # while the larger calendar-gap bug (v3.3) was overstating YoY by ~0.5pp;
-    # fixing that one exposed this smaller, independent, structural mismatch.
-    "cpi_index": "CPIAUCNS",
-    # New in this pass: the SA companion series, used ONLY for the two
-    # leading/current-read metrics below (cpi_3m_saar, cpi_mom_sa) -- never
-    # for cpi_yoy or short_real_rate, which must stay NSA.
-    "cpi_index_sa": "CPIAUCSL",
+    "cpi_index": "CPIAUCSL",
     "real_10y": "DFII10",
     "breakeven_10y": "T10YIE",
     "nom_10y": "DGS10",
@@ -309,39 +296,13 @@ def _inline_fetch_prices(ticker: str, period: str = "1y") -> pd.Series:
 # --------------------------------------------------------------------------- #
 #  Signal computation
 # --------------------------------------------------------------------------- #
-# ── CPI label constants — imported everywhere a CPI figure is displayed ─────
-# One source of truth so "CPI YoY (NSA)" can never drift into "CPI (NSA)" in
-# one file and "YoY CPI, not seasonally adjusted" in another. Every display
-# site — the dashboard header, the daily log line, the alert text — pulls
-# these exact strings rather than writing its own.
-CPI_YOY_LABEL   = "CPI YoY (NSA)"
-CPI_SAAR_LABEL  = "CPI 3M SAAR"
-CPI_MOM_LABEL   = "CPI MoM (SA)"
-
-CPI_YOY_HELP  = ("Trailing 12-month change, NOT seasonally adjusted — the "
-                 "figure BLS itself uses for its headline release and the "
-                 "one every news article quotes. LAGGING by design: still "
-                 "weighted by prints from up to 11 months ago. Feeds "
-                 "short_real_rate (EFFR minus this).")
-CPI_SAAR_HELP = ("Last 3 months, seasonally adjusted, compounded to an "
-                 "annual rate: ((index_now/index_3mo_ago)^4 - 1) x 100. "
-                 "LEADING: catches an inflation inflection months before "
-                 "it shows up in the slower YoY figure. Context only — "
-                 "does NOT feed the regime classifier.")
-CPI_MOM_HELP  = ("Single latest month, seasonally adjusted. The rawest, "
-                 "noisiest, most current read — the number markets react "
-                 "to on release day. Context only.")
-
-
 @dataclass
 class SignalSet:
     short_real_rate: Optional[float] = None      # EFFR - CPI YoY
     long_real_yield: Optional[float] = None      # DFII10 level
     long_real_mom_3m: Optional[float] = None     # change over ~63 sessions
     breakeven_10y: Optional[float] = None
-    cpi_yoy: Optional[float] = None               # NSA, 12mo — feeds short_real_rate
-    cpi_3m_saar: Optional[float] = None            # SA, 3mo annualized — leading
-    cpi_mom_sa: Optional[float] = None             # SA, latest single month
+    cpi_yoy: Optional[float] = None
     eff_funds: Optional[float] = None
     spread_2s10s: Optional[float] = None
     spread_2s10s_mom_3m: Optional[float] = None
@@ -380,7 +341,6 @@ def compute_signals(
 
     eff = fetch_fred(FRED_SERIES["eff_funds"], fred_api_key, start)
     cpi = fetch_fred(FRED_SERIES["cpi_index"], fred_api_key, start)
-    cpi_sa = fetch_fred(FRED_SERIES["cpi_index_sa"], fred_api_key, start)
     r10 = fetch_fred(FRED_SERIES["real_10y"], fred_api_key, start)
     be10 = fetch_fred(FRED_SERIES["breakeven_10y"], fred_api_key, start)
     n10 = fetch_fred(FRED_SERIES["nom_10y"], fred_api_key, start)
@@ -388,59 +348,12 @@ def compute_signals(
     hy = fetch_fred(FRED_SERIES["hy_oas"], fred_api_key, start)
     ig = fetch_fred(FRED_SERIES["ig_oas"], fred_api_key, start)
 
-    # --- CPI YoY from the index (resample to month-end; calendar-safe) ---
-    #
-    # v3.3 fix. Previously: resample("ME").last().dropna() BEFORE pct_change(12).
-    # Oct and Nov 2025 CPI were never published (BLS shutdown-related
-    # cancellation) -- CPIAUCSL has no observations for those two months, full
-    # stop, permanently. resample("ME") correctly creates NaN placeholder rows
-    # for them, spanning the true calendar gap -- but the immediate .dropna()
-    # REMOVED those placeholder rows, compressing the index. pct_change(12) is
-    # POSITION-based, not date-based: with the gap months physically removed,
-    # "12 rows back" from any month after the gap no longer equals "12 calendar
-    # months back" -- it lands roughly 2 months EARLIER than it should (e.g.
-    # comparing July 2026 to May 2025 instead of July 2025).
-    #
-    # Reproduced exactly with synthetic data spanning the real gap: this
-    # ordering overstated July 2026 YoY by +0.47pp against a same-inputs fixed
-    # calculation -- the same direction and rough magnitude as the live
-    # 3.54% (code) vs 3.4% (actual BLS July 2026 print, confirmed via news
-    # search) discrepancy this fix was written to close.
-    #
-    # Fix: dropna() AFTER pct_change(12), not before. Keeping the NaN
-    # placeholders through the position-based calculation preserves true
-    # calendar spacing -- pct_change(12) then correctly produces NaN only for
-    # the specific months whose OWN 12-months-back comparison touches a gap
-    # month, while every other month's comparison (like today's, once the
-    # window has moved past Oct/Nov 2025) stays calendar-accurate. Only strip
-    # NaN from the OUTPUT, once alignment is no longer at risk.
+    # --- CPI YoY from the index (resample to month-end so YoY is robust to
+    #     whatever frequency the fetcher returns) ---
     if cpi is not None and not cpi.empty:
-        cpi_m = cpi.resample("ME").last()          # keep gap-month NaNs
+        cpi_m = cpi.resample("ME").last().dropna()
         if len(cpi_m) > 12:
-            yoy = (cpi_m.pct_change(12) * 100).dropna()   # drop only now
-            if len(yoy):
-                sig.cpi_yoy = _last(yoy)
-
-    # --- CPI 3M SAAR (leading) and CPI MoM SA (most current) ---
-    # Deliberately SA here, unlike cpi_yoy above -- see CPI_SAAR_HELP /
-    # CPI_MOM_HELP. At a 3-month or 1-month window seasonal effects do NOT
-    # cancel the way they do over a full 12-month comparison, so seasonal
-    # adjustment is the theoretically correct choice for these two, exactly
-    # the mirror image of why cpi_yoy above must be NSA. Same
-    # dropna-after-pct_change discipline as the NSA fix, applied here too,
-    # so a future data gap in the SA series can't reintroduce the same
-    # calendar-alignment bug in a new place.
-    if cpi_sa is not None and not cpi_sa.empty:
-        cpi_sa_m = cpi_sa.resample("ME").last()          # keep gap NaNs
-        if len(cpi_sa_m) > 3:
-            mom = (cpi_sa_m.pct_change(1) * 100).dropna()
-            if len(mom):
-                sig.cpi_mom_sa = _last(mom)
-
-            saar = ((cpi_sa_m.pct_change(3) + 1) ** 4 - 1) * 100
-            saar = saar.dropna()
-            if len(saar):
-                sig.cpi_3m_saar = _last(saar)
+            sig.cpi_yoy = _last(cpi_m.pct_change(12) * 100)
 
     sig.eff_funds = _last(eff)
 
