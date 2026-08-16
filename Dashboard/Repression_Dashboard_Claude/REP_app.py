@@ -31,7 +31,7 @@ from repression_regime_section import render_regime_section
 
 # ─── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Markets Dashboard",
+    page_title="Financial Repression Monitor",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -149,38 +149,6 @@ def _resolve_fred_key() -> str:
     except Exception:
         pass
     return os.environ.get("FRED_API_KEY", "").strip()
-
-
-@st.cache_data(ttl=900)
-def _live_vix() -> float | None:
-    """Current VIX. None on any failure — never a fabricated default."""
-    try:
-        import yfinance as yf
-        h = yf.Ticker("^VIX").history(period="5d")
-        return round(float(h["Close"].iloc[-1]), 2) if not h.empty else None
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl=900)
-def _live_vix_rank() -> float | None:
-    """
-    VIX percentile within its own trailing 1-year range.
-
-    This is what prices the convexity budget: protection bought in the
-    bottom quartile of VIX's own year is dramatically cheaper than the same
-    protection after a spike, and the whole point of the vol-priced budget
-    is to buy when cheap rather than when frightened.
-    """
-    try:
-        import yfinance as yf
-        h = yf.Ticker("^VIX").history(period="1y")
-        if h.empty or len(h) < 60:
-            return None
-        closes = h["Close"].dropna()
-        return round(float((closes <= closes.iloc[-1]).mean()) * 100, 1)
-    except Exception:
-        return None
 
 
 def _verdict_subtext(overall, raw: dict) -> str:
@@ -835,17 +803,15 @@ def term_premium_section():
 
 def main():
     # ── Header ────────────────────────────────────────────────────────────────
-    st.markdown('<p class="sec-label">Macro research · Regime classification &amp; portfolio construction</p>',
+    st.markdown('<p class="sec-label">Macro research · Financial repression monitor</p>',
                 unsafe_allow_html=True)
 
     col_title, col_refresh = st.columns([6, 1])
     with col_title:
-        st.markdown("## Markets Dashboard")
+        st.markdown("## Financial Repression Proximity Monitor")
         st.markdown(
             "<span style='color:#9aa3b2;font-size:.88rem;'>"
-            "Live data from FRED &amp; Yahoo Finance · Names the macro regime "
-            "across four axes — rates, credit, growth, valuation — and maps it "
-            "to a portfolio construction"
+            "Live data from FRED &amp; Yahoo Finance · Scores each indicator against repression thresholds"
             "</span>", unsafe_allow_html=True
         )
     with col_refresh:
@@ -964,21 +930,8 @@ def main():
     st.markdown("---")
 
     # ── Tabs: Scorecard | Charts | Timeline | Watchlist ───────────────────────
-    # v4 RESTRUCTURE: the regime classifier is now the CENTREPIECE, not tab 7.
-    # This dashboard was architected to answer one question — "how close are we
-    # to financial repression?" — with the classifier bolted on later. A macro
-    # markets dashboard inverts that: the regime is the headline, and
-    # repression is ONE regime among eight it can name.
-    #
-    # Tab order now follows the decision sequence a reader actually needs:
-    #   Regime (what environment)  ->  Portfolio (what to hold)
-    #   ->  Growth / Credit-Rates (the axes behind the call)
-    #   ->  Repression Watch (the original thesis, now a sub-state)
-    #   ->  reference tabs.
-    tab7, tab_port, tab_growth, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-        ["🌡️ Regime Classifier", "🧭 Portfolio Construction", "📉 Growth Monitor",
-         "📋 Repression Watch", "📈 Historical Charts", "⏱ Catalyst Timeline",
-         "👁 Daily Watchlist", "💰 Regime Playbooks", "🏦 Fed Balance Sheet (H.4.1)"]
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        ["📋 Indicator Scorecard", "📈 Historical Charts", "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Wealth-Building Assets", "🏦 Fed Balance Sheet (H.4.1)", "🌡️ Regime Classifier"]
     )
 
     # ── TAB 7: REGIME CLASSIFIER ──────────────────────────────────────────────
@@ -1013,82 +966,13 @@ def main():
     with tab7:
         def _fred_adapter(series_id, api_key, start_date="2015-01-01"):
             return _fetch_fred_inline(series_id, start_date)
-        _regime_out = render_regime_section(
+        render_regime_section(
             fred_key, fetch_fred=_fred_adapter,
             fed_bs_expanding=FED_BS_EXPANDING,
             deficit_gt_5pct_gdp=DEFICIT_GT_5PCT_GDP,
             cape=CAPE_CURRENT,
             top20_concentration_pct=TOP20_CONCENTRATION_PCT,
-            vix=_live_vix(), vix_pct_rank=_live_vix_rank(),
         )
-
-    # ── TAB: PORTFOLIO CONSTRUCTION ───────────────────────────────────────────
-    with tab_port:
-        try:
-            import portfolio_construction as pc
-            import regime_classifier as _rc
-            if _regime_out:
-                _reg = _regime_out.get("regime", {})
-                _wts = _regime_out.get("targets", {})
-                _growth = _regime_out.get("growth")
-                _cvx = None
-                try:
-                    import risk_budget as _rb_mod
-                    _vq = _rb_mod.vol_quartile(_live_vix(), None)
-                    _cvx = _rb_mod.convexity_budget(_vq, _reg.get("key", ""))["pct_of_nav"]
-                except Exception:
-                    pass
-                _plan = pc.build(_reg.get("key", "neutral"), _wts,
-                                 _rc.BASE_WEIGHTS, growth=_growth,
-                                 convexity_pct=_cvx)
-                pc.render(st, _plan, _rc.BASE_WEIGHTS)
-            else:
-                st.info("Run the Regime Classifier tab first — this view is "
-                       "built from its output.")
-        except Exception as e:
-            st.error(f"Portfolio construction unavailable: {e}")
-
-    # ── TAB: GROWTH MONITOR ───────────────────────────────────────────────────
-    with tab_growth:
-        st.markdown("### Growth Monitor")
-        st.caption(
-            "The fourth macro axis. This framework was built around rates, "
-            "credit and valuation — growth was absent entirely, which is why "
-            "a contracting economy could not be named as a regime until now. "
-            "Two labour series and two consumer series, each voting "
-            "independently."
-        )
-        try:
-            import growth_signals as gs
-            _g = gs.assess(_fred_adapter, fred_key)
-            _gcol = {"CONTRACTING": "#dc2626", "DETERIORATING": "#d97706",
-                     "NEUTRAL": "#6b7280", "EXPANDING": "#16a34a"}.get(
-                         _g.get("state"), "#6b7280")
-            st.markdown(
-                f"<h2 style='color:{_gcol};margin:8px 0;'>{_g.get('state')} "
-                f"<span style='font-size:1rem;color:#9ca3af;'>"
-                f"({_g.get('score', 0):+d})</span></h2>",
-                unsafe_allow_html=True)
-            st.caption(_g.get("detail", ""))
-            if not _g.get("confirmed"):
-                st.warning("⚠ UNCONFIRMED — fewer than 3 of 4 series are "
-                          "live, so the classifier will NOT act on this "
-                          "reading. A single noisy series must never move a "
-                          "regime on its own.")
-            st.markdown("---")
-            for v in _g.get("votes", []):
-                icon = "🔴" if v["vote"] < 0 else "🟢" if v["vote"] > 0 else "⚪"
-                st.markdown(f"### {icon} {v['name']}")
-                st.markdown(f"**{v['reading']}** &nbsp; (vote {v['vote']:+d})")
-                st.caption(v["detail"])
-                st.markdown("")
-            if _g.get("missing"):
-                st.info(f"Missing series: {', '.join(_g['missing'])}. These "
-                       f"cast NO vote — a missing input and a neutral input "
-                       f"are different states, and this panel will never "
-                       f"conflate them.")
-        except Exception as e:
-            st.error(f"Growth monitor unavailable: {e}")
 
     # ── TAB 1: SCORECARD ──────────────────────────────────────────────────────
     with tab1:
