@@ -53,8 +53,7 @@ def build(sig=None, growth: Optional[dict] = None,
           vix_pct_rank: Optional[float] = None,
           gold_price: Optional[float] = None,
           gold_200d: Optional[float] = None,
-          gold_200d_rising: Optional[bool] = None,
-          curve: Optional[dict] = None) -> list[dict]:
+          gold_200d_rising: Optional[bool] = None) -> list[dict]:
     """
     Build the full tripwire list. Every argument optional; anything missing
     renders as unavailable rather than being skipped silently.
@@ -158,34 +157,6 @@ def build(sig=None, growth: Optional[dict] = None,
                        "fall", HIGH, unit=" pts",
                        note="Growth axis dark — degraded, not benign.",
                        available=False))
-
-    # ── 4b. Yield curve — 3M10Y is THE recession spread ────────────────────
-    # Presented as a tripwire, NOT a classifier input. Inversions have led
-    # every modern US recession, but with long, variable lead times and a
-    # non-zero false-positive rate (2019 preceded a pandemic recession; the
-    # 2022-24 inversion was the longest on record without one following on
-    # schedule). Same category as CAPE here: structurally informative,
-    # deliberately not a timing trigger.
-    if curve:
-        for row in curve.get("spreads", []):
-            if row.get("name") == "3M-10Y" and row.get("available"):
-                v = row["value"]
-                out.append(_tw(
-                    "3M–10Y → inversion", v, 0.0, v, "fall", HIGH, unit="bp",
-                    note=("The NY Fed's own recession model is built on this "
-                          "spread. Crossing below zero is the signal — but "
-                          "with a long and variable lead time. Context, not "
-                          "a trigger.")))
-        st_ = curve.get("steepening_2s10s", {})
-        if st_.get("available") and st_.get("type") == "BULL STEEPENING":
-            out.append(_tw(
-                "Curve → bull steepening ACTIVE", st_["d_spread_bp"], 0.0,
-                0.0, "already tripped", CRITICAL, unit="bp",
-                note=("Short end falling faster than the long end — the "
-                      "market is pricing CUTS. This framework's checklist "
-                      "flags rapid bull steepening from inversion as the "
-                      "most violent regime-shift signal there is, warranting "
-                      "immediate review rather than the weekly cycle.")))
 
     # ── 5. Valuation guard — what would UNBLOCK goldilocks ──────────────────
     if cape is not None:

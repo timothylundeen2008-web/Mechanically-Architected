@@ -975,11 +975,10 @@ def main():
     #   ->  Growth / Credit-Rates (the axes behind the call)
     #   ->  Repression Watch (the original thesis, now a sub-state)
     #   ->  reference tabs.
-    tab7, tab_port, tab_growth, tab_curve, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    tab7, tab_port, tab_growth, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         ["🌡️ Regime Classifier", "🧭 Portfolio Construction", "📉 Growth Monitor",
-         "📐 Yield Curve", "📋 Repression Watch", "📈 Historical Charts",
-         "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Regime Playbooks",
-         "🏦 Fed Balance Sheet (H.4.1)"]
+         "📋 Repression Watch", "📈 Historical Charts", "⏱ Catalyst Timeline",
+         "👁 Daily Watchlist", "💰 Regime Playbooks", "🏦 Fed Balance Sheet (H.4.1)"]
     )
 
     # ── TAB 7: REGIME CLASSIFIER ──────────────────────────────────────────────
@@ -1048,15 +1047,6 @@ def main():
                        "built from its output.")
         except Exception as e:
             st.error(f"Portfolio construction unavailable: {e}")
-
-    # ── TAB: YIELD CURVE ──────────────────────────────────────────────────────
-    with tab_curve:
-        try:
-            import curve_analysis as ca
-            _cv = ca.assess(_fred_adapter, fred_key)
-            ca.render(st, _cv)
-        except Exception as e:
-            st.error(f"Curve analysis unavailable: {e}")
 
     # ── TAB: GROWTH MONITOR ───────────────────────────────────────────────────
     with tab_growth:

@@ -181,14 +181,7 @@ def render_regime_section(fred_api_key: str = "",
     # ── Tripwire panel — pinned directly under the banner, always visible ───
     try:
         import tripwires as tw
-        _curve = None
-        try:
-            import curve_analysis as _ca
-            _curve = _ca.assess(kw.get("fetch_fred") or rc._inline_fetch_fred,
-                                fred_api_key)
-        except Exception:
-            pass
-        rows = tw.build(sig=sig, growth=growth, cape=cape, curve=_curve,
+        rows = tw.build(sig=sig, growth=growth, cape=cape,
                         top20_concentration_pct=top20_concentration_pct,
                         vix=vix, vix_pct_rank=vix_pct_rank,
                         gold_price=out.get("gold_price"),
