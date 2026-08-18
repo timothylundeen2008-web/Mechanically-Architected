@@ -975,12 +975,11 @@ def main():
     #   ->  Growth / Credit-Rates (the axes behind the call)
     #   ->  Repression Watch (the original thesis, now a sub-state)
     #   ->  reference tabs.
-    (tab7, tab_port, tab_cvx, tab_growth, tab_curve, tab1, tab2, tab3,
-     tab4, tab5, tab6) = st.tabs(
-        ["🌡️ Regime Classifier", "🧭 Portfolio Construction", "🛡️ Convexity Sleeve",
-         "📉 Growth Monitor", "📐 Yield Curve", "📋 Repression Watch",
-         "📈 Historical Charts", "⏱ Catalyst Timeline", "👁 Daily Watchlist",
-         "💰 Regime Playbooks", "🏦 Fed Balance Sheet (H.4.1)"]
+    tab7, tab_port, tab_growth, tab_curve, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+        ["🌡️ Regime Classifier", "🧭 Portfolio Construction", "📉 Growth Monitor",
+         "📐 Yield Curve", "📋 Repression Watch", "📈 Historical Charts",
+         "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Regime Playbooks",
+         "🏦 Fed Balance Sheet (H.4.1)"]
     )
 
     # ── TAB 7: REGIME CLASSIFIER ──────────────────────────────────────────────
@@ -1049,54 +1048,6 @@ def main():
                        "built from its output.")
         except Exception as e:
             st.error(f"Portfolio construction unavailable: {e}")
-
-    # ── TAB: CONVEXITY SLEEVE ─────────────────────────────────────────────────
-    with tab_cvx:
-        try:
-            import convexity_sleeve as cvx
-            import risk_budget as rb_mod
-
-            _vix = _live_vix()
-            _rank = _live_vix_rank()
-
-            st.caption(
-                "⚠ Educational/analytical tool, not a recommendation. Options "
-                "carry TOTAL LOSS OF PREMIUM as the base case here — most "
-                "quarters this expires worthless by design. Premium figures "
-                "are Black-Scholes estimates, not quotes."
-            )
-
-            cc1, cc2, cc3 = st.columns(3)
-            _nav = cc1.number_input("Portfolio NAV ($)", min_value=10_000,
-                                    max_value=100_000_000, value=100_000,
-                                    step=10_000)
-            _spx = cc2.number_input("S&P 500 index level", min_value=1000.0,
-                                    max_value=20_000.0, value=7745.0, step=5.0)
-            _instr = cc3.selectbox("Structure",
-                                   ["SPY put (outright)", "SPY put SPREAD",
-                                    "SPX put (outright)"])
-
-            # Build the vol-priced budget from the SAME logic risk_budget uses
-            # for the whole framework — this tab does not invent its own
-            # sizing rule.
-            _vq = {"available": False, "quartile": None,
-                   "detail": "VIX percentile unavailable."}
-            if _vix is not None and _rank is not None:
-                _q = (1 if _rank < 25 else 2 if _rank < 50
-                      else 3 if _rank < 75 else 4)
-                _vq = {"available": True, "quartile": _q, "pct_rank": _rank,
-                       "detail": (f"VIX {_vix:.1f} is the {_rank:.0f}th "
-                                 f"percentile of its trailing year → Q{_q}")}
-            _budget = rb_mod.convexity_budget(_vq, "", nav=_nav)
-
-            _plan = cvx.design(
-                nav=_nav, budget_pct=_budget["pct_of_nav"], spot=_spx,
-                vix=_vix,
-                use_spx=(_instr == "SPX put (outright)"),
-                use_spread=(_instr == "SPY put SPREAD"))
-            cvx.render(st, _plan, _budget, _nav)
-        except Exception as e:
-            st.error(f"Convexity sleeve unavailable: {e}")
 
     # ── TAB: YIELD CURVE ──────────────────────────────────────────────────────
     with tab_curve:
