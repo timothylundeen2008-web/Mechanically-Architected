@@ -1655,17 +1655,6 @@ def fed_balance_sheet_tab(raw: dict):
         if len(walcl_s) >= 2:
             wc = walcl_s.dropna()
             raw["bs_wow_change_bn"] = round((wc.iloc[-1] - wc.iloc[-2]) * 1000, 1)
-            # Multi-week rates for the posture classifier. Computed from the
-            # SAME already-fetched series — no extra network calls.
-            if len(wc) >= 5:
-                raw["bs_4wk_avg_bn"] = round(
-                    (wc.iloc[-1] - wc.iloc[-5]) / 4 * 1000, 1)
-            if len(wc) >= 14:
-                raw["bs_13wk_avg_bn"] = round(
-                    (wc.iloc[-1] - wc.iloc[-14]) / 13 * 1000, 1)
-            if len(wc) >= 53:
-                raw["bs_52wk_change_bn"] = round(
-                    (wc.iloc[-1] - wc.iloc[-53]) * 1000, 1)
         bs_peak_t = 8.965
         walcl_lv = latest(walcl_s)
         raw["bs_drawdown_pct"] = (
@@ -1743,64 +1732,16 @@ def fed_balance_sheet_tab(raw: dict):
         clr  = "#5a9e47" if v >= 0 else "#e05252"
         return sign, v, clr
 
-    # ── Fed posture classifier (v2) ─────────────────────────────────────────
-    # PREVIOUS BUG: a single week of >= +$10B printed "QE EXPANDING ⚠" in red.
-    # On 2026-08-12 a +$11.4B week tripped it — while the card immediately
-    # beside it read "−24.6% from peak · QT progress". Two adjacent cards
-    # telling opposite stories, and the alarming one was the artifact.
-    #
-    # Three problems with the old rule:
-    #   1. NO PERSISTENCE. One noisy print fired it. H.4.1 bounces weekly on
-    #      TGA swings and repo operations; real QE is a sustained programme.
-    #   2. WRONG MAGNITUDE. During actual QE the sheet grew ~$120B/MONTH.
-    #      +$11B/week annualises to ~$570B/yr, but the realised 12-month
-    #      change is only ~+$108B (+1.6%). That is reserve-management growth,
-    #      which the Fed itself distinguishes from QE.
-    #   3. NO MIDDLE STATE. There was no label for "modest sustained
-    #      expansion", so anything positive-and-persistent had to render as
-    #      either QE or "flat".
-    #
-    # v2 requires BOTH persistence (4-week average) AND magnitude, and adds
-    # the reserve-management state that describes what is actually happening.
-    wk4  = raw.get("bs_4wk_avg_bn")
-    wk13 = raw.get("bs_13wk_avg_bn")
-    yr52 = raw.get("bs_52wk_change_bn")
-
-    # ~$20B/wk ≈ $1T/yr — a genuine QE pace. ~$5B/wk ≈ $260B/yr — the
-    # reserve-management band the Fed has been running.
-    QE_WEEKLY_BN, RESERVE_MGMT_WEEKLY_BN, QT_WEEKLY_BN = 20.0, 5.0, -5.0
-
-    if wk4 is None:
-        # Not enough history to judge persistence — say so rather than
-        # falling back to the single-week rule that caused this bug.
-        bs_signal, bs_signal_clr = "Insufficient history", "#5c6475"
-        bs_signal_note = ("Need 5+ weekly observations to assess persistence. "
-                         "A single week is noise, not a posture.")
-    elif wk4 >= QE_WEEKLY_BN and (wk13 is None or wk13 > 0):
-        bs_signal, bs_signal_clr = "QE EXPANDING ⚠", "#e05252"
-        bs_signal_note = (f"4-week average +${wk4:,.1f}B/wk sustained "
-                         f"(≈${wk4*52/1000:,.1f}T/yr pace). This is a "
-                         f"genuine expansion programme, not week-to-week "
-                         f"noise.")
-    elif wk4 >= RESERVE_MGMT_WEEKLY_BN:
-        bs_signal, bs_signal_clr = "Reserve-management growth", "#d4913a"
-        bs_signal_note = (f"4-week average +${wk4:,.1f}B/wk — modest "
-                         f"sustained growth, well below a QE pace "
-                         f"(≥${QE_WEEKLY_BN:,.0f}B/wk). The Fed distinguishes "
-                         f"reserve-management purchases from QE; so does "
-                         f"this classifier.")
-    elif wk4 > QT_WEEKLY_BN:
-        bs_signal, bs_signal_clr = "Flat / neutral", "#d4913a"
-        bs_signal_note = (f"4-week average {wk4:+,.1f}B/wk — inside noise. "
-                         f"Neither expanding nor shrinking meaningfully.")
+    # QT vs QE signal
+    if wow_change is not None:
+        if wow_change >= 10:
+            bs_signal, bs_signal_clr = "QE EXPANDING ⚠", "#e05252"
+        elif wow_change >= 0:
+            bs_signal, bs_signal_clr = "Flat / Slight Expansion", "#d4913a"
+        else:
+            bs_signal, bs_signal_clr = "QT SHRINKING ✓", "#5a9e47"
     else:
-        bs_signal, bs_signal_clr = "QT SHRINKING ✓", "#5a9e47"
-        bs_signal_note = (f"4-week average {wk4:+,.1f}B/wk — sustained "
-                         f"balance-sheet runoff.")
-
-    if yr52 is not None:
-        bs_signal_note += (f" 52-week change {yr52:+,.0f}B "
-                          f"({yr52/6760:+.1f}% of the current sheet).")
+        bs_signal, bs_signal_clr = "N/A", "#5c6475"
 
     # ── Top KPI row ─────────────────────────────────────────────────────────────
     k1, k2, k3, k4, k5 = st.columns(5)
@@ -1855,31 +1796,15 @@ def fed_balance_sheet_tab(raw: dict):
 
     # ── QE/QT Signal banner ─────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    # Show the actual PACE at three horizons, not just a label. The whole
-    # reason the old classifier misfired is that a single WoW number was
-    # doing work it cannot do — a reader could not see whether +$11B was a
-    # one-week blip or a trend without the 4/13/52-week context beside it.
-    _rate_bits = [
-        f'WoW: {fmt_B(wow_change) if wow_change is not None else "N/A"}',
-        f'4wk avg: {fmt_B(wk4) + "/wk" if wk4 is not None else "N/A"}',
-        f'13wk avg: {fmt_B(wk13) + "/wk" if wk13 is not None else "N/A"}',
-        f'52wk: {fmt_B(yr52) if yr52 is not None else "N/A"}',
-    ]
     st.markdown(
         f'<div style="background:#13161b;border:1px solid #242830;'
         f'border-left:4px solid {bs_signal_clr};border-radius:10px;'
-        f'padding:.85rem 1.25rem;margin-bottom:.4rem;">'
+        f'padding:.85rem 1.25rem;margin-bottom:1rem;">'
         f'<span style="font-size:.88rem;font-weight:700;color:{bs_signal_clr};">'
         f'Current Fed posture: {bs_signal}</span>'
         f'<span style="font-size:.78rem;color:#9aa3b2;margin-left:16px;">'
-        + " | ".join(_rate_bits) +
-        f'</span><br>'
-        f'<span style="font-size:.76rem;color:#7a8394;">{bs_signal_note}</span>'
-        f'<br><span style="font-size:.74rem;color:#5c6475;">'
-        f'TGA: {fmt_B(tga)} | ON RRP: {fmt_B(rrp)} · '
-        f'Thresholds: QE ≥ ${QE_WEEKLY_BN:.0f}B/wk sustained · '
-        f'reserve-management ≥ ${RESERVE_MGMT_WEEKLY_BN:.0f}B/wk · '
-        f'QT ≤ ${QT_WEEKLY_BN:.0f}B/wk'
+        f'WoW change: {fmt_B(wow_change) if wow_change is not None else "N/A"} | '
+        f'TGA: {fmt_B(tga)} | ON RRP: {fmt_B(rrp)}'
         f'</span></div>',
         unsafe_allow_html=True
     )
