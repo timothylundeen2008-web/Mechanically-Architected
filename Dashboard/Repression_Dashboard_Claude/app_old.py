@@ -975,13 +975,12 @@ def main():
     #   ->  Growth / Credit-Rates (the axes behind the call)
     #   ->  Repression Watch (the original thesis, now a sub-state)
     #   ->  reference tabs.
-    (tab7, tab_port, tab_alpha, tab_cvx, tab_growth, tab_curve, tab1, tab2,
-     tab3, tab4, tab5, tab6) = st.tabs(
-        ["🌡️ Regime Classifier", "🧭 Portfolio Construction",
-         "⚡ Return Engine", "🛡️ Convexity Sleeve", "📉 Growth Monitor",
-         "📐 Yield Curve", "📋 Repression Watch", "📈 Historical Charts",
-         "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Regime Playbooks",
-         "🏦 Fed Balance Sheet (H.4.1)"]
+    (tab7, tab_port, tab_cvx, tab_growth, tab_curve, tab1, tab2, tab3,
+     tab4, tab5, tab6) = st.tabs(
+        ["🌡️ Regime Classifier", "🧭 Portfolio Construction", "🛡️ Convexity Sleeve",
+         "📉 Growth Monitor", "📐 Yield Curve", "📋 Repression Watch",
+         "📈 Historical Charts", "⏱ Catalyst Timeline", "👁 Daily Watchlist",
+         "💰 Regime Playbooks", "🏦 Fed Balance Sheet (H.4.1)"]
     )
 
     # ── TAB 7: REGIME CLASSIFIER ──────────────────────────────────────────────
@@ -1050,91 +1049,6 @@ def main():
                        "built from its output.")
         except Exception as e:
             st.error(f"Portfolio construction unavailable: {e}")
-
-    # ── TAB: RETURN ENGINE ────────────────────────────────────────────────────
-    # The four return-oriented layers. Everything else in this dashboard is a
-    # RISK framework — it answers "what environment is this and how do I avoid
-    # being badly wrong". These four answer "given that, how do I size to be
-    # right". They do not manufacture returns; they improve the quality of
-    # exposure, concentration and timing decisions.
-    with tab_alpha:
-        st.markdown("## Return Engine")
-        st.caption(
-            "Relative strength · trend gating · conviction sizing · factor "
-            "exposure. These layers improve decision QUALITY — they do not "
-            "create returns from nothing. Realistic contribution is a few "
-            "points of annualised return over a full cycle, mostly by "
-            "avoiding drawdowns rather than capturing extra upside."
-        )
-
-        try:
-            import regime_classifier as _rc
-            import relative_strength as _rs_mod
-            import trend_filter as _tf
-            import position_sizing as _ps
-            import factor_exposure as _fx
-
-            _universe = list(_rc.BASE_WEIGHTS.keys())
-            _fp = _rc._inline_fetch_prices
-
-            _sub = st.radio(
-                "Layer", ["Relative Strength", "Trend Filter",
-                          "Position Sizing", "Factor Exposure"],
-                horizontal=True, label_visibility="collapsed")
-
-            if _sub == "Relative Strength":
-                with st.spinner("Ranking universe…"):
-                    _rs = _rs_mod.rank_universe(_fp, _universe)
-                _rs_mod.render(st, _rs, _rc.BASE_WEIGHTS)
-
-            elif _sub == "Trend Filter":
-                with st.spinner("Assessing trends…"):
-                    _tr = _tf.assess_universe(_fp, _universe)
-                _tf.render(st, _tr, _rc.BASE_WEIGHTS)
-
-            elif _sub == "Position Sizing":
-                with st.spinner("Scoring conviction…"):
-                    _rs = _rs_mod.rank_universe(_fp, _universe)
-                    _tr = _tf.assess_universe(_fp, _universe)
-                _reg_key = (_regime_out or {}).get("regime", {}).get("key", "")
-                _confirmed = _reg_key in ("goldilocks", "inflationary_repression",
-                                          "hard_repression", "stagflation")
-                _conv = {}
-                for tk in _universe:
-                    _conv[tk] = _ps.score_conviction(
-                        regime_confirmed=_confirmed,
-                        rs_quartile=_rs.get("quartiles", {}).get(tk),
-                        trend_state=_tr.get("states", {}).get(tk, {}).get("state"),
-                        valuation_cheap=None)
-
-                st.markdown("##### Leverage controls")
-                _lev_on = st.checkbox(
-                    "Enable leverage (default OFF)", value=False,
-                    help="Leverage is OFF by default. Every gate below must "
-                         "pass; any single failure returns 1.00x.")
-                _corr = st.number_input(
-                    "Average pairwise correlation", 0.0, 1.0, 0.60, 0.05,
-                    help="From the Factor Exposure layer. Above 0.55 leverage "
-                         "is refused — this is the 2022 risk-parity failure "
-                         "mode.")
-                _rvol = st.number_input(
-                    "Realised portfolio vol (annualised %)", 0.0, 60.0,
-                    14.0, 0.5)
-                _avg_conv = (sum(c["multiplier"] for c in _conv.values())
-                             / max(len(_conv), 1))
-                _lev = _ps.leverage_decision(
-                    enabled=_lev_on, regime_key=_reg_key,
-                    avg_correlation=_corr, realised_vol=_rvol,
-                    conviction_avg=_avg_conv)
-                _ps.render(st, _conv, _lev, _rc.BASE_WEIGHTS)
-
-            else:
-                with st.spinner("Decomposing factor exposure…"):
-                    _res = _fx.analyse(_fp, _rc.BASE_WEIGHTS)
-                _fx.render(st, _res)
-
-        except Exception as e:
-            st.error(f"Return Engine unavailable: {e}")
 
     # ── TAB: CONVEXITY SLEEVE ─────────────────────────────────────────────────
     with tab_cvx:
