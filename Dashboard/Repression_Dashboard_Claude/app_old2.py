@@ -840,11 +840,6 @@ def main():
 
     col_title, col_refresh = st.columns([6, 1])
     with col_title:
-        try:
-            import dashboard_links as _dl
-            _dl.render_nav(st, "markets")
-        except Exception:
-            pass
         st.markdown("## Markets Dashboard")
         st.markdown(
             "<span style='color:#9aa3b2;font-size:.88rem;'>"
@@ -981,12 +976,12 @@ def main():
     #   ->  Repression Watch (the original thesis, now a sub-state)
     #   ->  reference tabs.
     (tab7, tab_port, tab_alpha, tab_cvx, tab_growth, tab_curve, tab1, tab2,
-     tab3, tab4, tab5, tab6, tab_logs) = st.tabs(
+     tab3, tab4, tab5, tab6) = st.tabs(
         ["🌡️ Regime Classifier", "🧭 Portfolio Construction",
          "⚡ Return Engine", "🛡️ Convexity Sleeve", "📉 Growth Monitor",
          "📐 Yield Curve", "📋 Repression Watch", "📈 Historical Charts",
          "⏱ Catalyst Timeline", "👁 Daily Watchlist", "💰 Regime Playbooks",
-         "🏦 Fed Balance Sheet (H.4.1)", "📋 Daily & Weekly Logs"]
+         "🏦 Fed Balance Sheet (H.4.1)"]
     )
 
     # ── TAB 7: REGIME CLASSIFIER ──────────────────────────────────────────────
@@ -1029,22 +1024,6 @@ def main():
             top20_concentration_pct=TOP20_CONCENTRATION_PCT,
             vix=_live_vix(), vix_pct_rank=_live_vix_rank(),
         )
-
-    # Publish this dashboard's outputs so All-Weather can consume them.
-    # Mirrors rotation_bridge's pattern — same storage backend, same
-    # staleness discipline. Failure here must never break the dashboard.
-    try:
-        import markets_bridge as _mb
-        if _regime_out:
-            _mb.publish(
-                regime=_regime_out.get("regime", {}),
-                repression=_regime_out.get("repression", {}),
-                growth=_regime_out.get("growth"),
-                kmlm=_regime_out.get("kmlm"),
-                targets=_regime_out.get("targets"),
-                notes="auto-published on Markets Dashboard render")
-    except Exception as _e:
-        print(f"[markets_bridge] publish skipped: {_e}")
 
     # ── TAB: PORTFOLIO CONSTRUCTION ───────────────────────────────────────────
     with tab_port:
@@ -3442,19 +3421,3 @@ if __name__ == "__main__":
         diagnose_page()
     else:
         main()
-
-
-    # ── TAB: DAILY & WEEKLY LOGS ──────────────────────────────────────────────
-    # Same log_viewer used by All-Weather, reading this repo's own logs/
-    # directory. The Markets Dashboard now runs its own scheduled log rather
-    # than relying on Portfolio-Tracker's — the two capture different things
-    # (this one captures the regime/growth/curve state, that one captures the
-    # portfolio state) and neither is a substitute for the other.
-    with tab_logs:
-        try:
-            import log_viewer
-            log_viewer.render(st)
-        except Exception as e:
-            st.error(f"Log viewer unavailable: {e}")
-            st.caption("Reports are still written to logs/summaries/ in the "
-                      "repo regardless of this tab.")
