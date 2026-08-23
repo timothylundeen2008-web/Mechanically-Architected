@@ -1635,25 +1635,6 @@ def main():
     with tab6:
         fed_balance_sheet_tab(raw)
 
-
-    # ── TAB: DAILY & WEEKLY LOGS ──────────────────────────────────────────────
-    # Same log_viewer used by All-Weather, reading this repo's own logs/
-    # directory. Placed INSIDE main(), immediately after tab6 — same
-    # indentation and scope as every other real tab, so tab_logs (a name
-    # local to main()) is actually in scope when this block runs. The
-    # previous version was appended to the raw end of the file, OUTSIDE
-    # main() and after the router that calls it — tab_logs had already gone
-    # out of scope by the time that code ran, which is exactly what produced
-    # the NameError.
-    with tab_logs:
-        try:
-            import log_viewer
-            log_viewer.render(st)
-        except Exception as e:
-            st.error(f"Log viewer unavailable: {e}")
-            st.caption("Reports are still written to logs/summaries/ in the "
-                      "repo regardless of this tab.")
-
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown(
@@ -3462,3 +3443,18 @@ if __name__ == "__main__":
     else:
         main()
 
+
+    # ── TAB: DAILY & WEEKLY LOGS ──────────────────────────────────────────────
+    # Same log_viewer used by All-Weather, reading this repo's own logs/
+    # directory. The Markets Dashboard now runs its own scheduled log rather
+    # than relying on Portfolio-Tracker's — the two capture different things
+    # (this one captures the regime/growth/curve state, that one captures the
+    # portfolio state) and neither is a substitute for the other.
+    with tab_logs:
+        try:
+            import log_viewer
+            log_viewer.render(st)
+        except Exception as e:
+            st.error(f"Log viewer unavailable: {e}")
+            st.caption("Reports are still written to logs/summaries/ in the "
+                      "repo regardless of this tab.")
