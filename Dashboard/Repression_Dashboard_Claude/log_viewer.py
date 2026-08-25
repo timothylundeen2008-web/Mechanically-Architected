@@ -40,8 +40,35 @@ import os
 import re
 from datetime import datetime
 
+# ⚠ REPO SUBPATH. The GitHub Contents API always needs a path relative to
+# the REPO ROOT — it has no concept of "current folder". auto_log.py's LOCAL
+# writes are fine wherever they run (relative to whatever cwd the workflow
+# sets via `working-directory:`), but this module's GitHub reads were built
+# assuming app.py lives at the repo root. Portfolio-Tracker and Money_Flow
+# genuinely do; the Markets Dashboard does NOT — its app.py sits in
+# Dashboard/Repression_Dashboard_Claude/, so a bare "logs/summaries" query
+# was silently asking the GitHub API for a path that has never existed
+# (repo_root/logs/summaries instead of the real
+# repo_root/Dashboard/Repression_Dashboard_Claude/logs/summaries). That
+# produced a PERMANENT "No reports found" regardless of secrets, reboots, or
+# how many successful runs committed real data — this had nothing to do with
+# staleness or auth.
+#
+# Set to "" for a repo where app.py lives at the root (Portfolio-Tracker,
+# Money_Flow). Set to the folder containing app.py, no leading/trailing
+# slash, for a nested deployment like this one.
+REPO_SUBPATH = "Dashboard/Repression_Dashboard_Claude"
+
+
+def _repo_path(relative: str) -> str:
+    """Prefix a logs/-relative path with REPO_SUBPATH for GitHub API calls."""
+    return f"{REPO_SUBPATH}/{relative}" if REPO_SUBPATH else relative
+
+
 LOG_DIR = "logs"
-SUMMARY_DIR = "logs/summaries"
+SUMMARY_DIR = "logs/summaries"           # LOCAL filesystem path — unprefixed,
+                                          # correct as-is when Streamlit's cwd
+                                          # matches where app.py lives.
 DAILY_CSV = "logs/daily_log.csv"
 WEEKLY_CSV = "logs/weekly_log.csv"
 
@@ -84,7 +111,7 @@ def _gh_read(path: str) -> str | None:
 
 def list_reports() -> tuple[list[str], str]:
     """(filenames, source). GitHub first so a stale checkout can't masquerade."""
-    names = _gh_list(SUMMARY_DIR)
+    names = _gh_list(_repo_path(SUMMARY_DIR))
     if names is not None and names:
         return sorted(names, reverse=True), SRC_GITHUB
     if os.path.isdir(SUMMARY_DIR):
@@ -96,7 +123,7 @@ def list_reports() -> tuple[list[str], str]:
 
 def read_report(filename: str) -> tuple[str | None, str]:
     path = f"{SUMMARY_DIR}/{filename}"
-    txt = _gh_read(path)
+    txt = _gh_read(_repo_path(path))
     if txt:
         return txt, SRC_GITHUB
     try:
@@ -113,7 +140,7 @@ def read_history(kind: str = "daily"):
     import io
     import pandas as pd
     path = DAILY_CSV if kind == "daily" else WEEKLY_CSV
-    txt = _gh_read(path)
+    txt = _gh_read(_repo_path(path))
     if txt:
         try:
             return pd.read_csv(io.StringIO(txt)), SRC_GITHUB
