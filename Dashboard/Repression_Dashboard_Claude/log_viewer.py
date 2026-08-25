@@ -78,23 +78,59 @@ SRC_NONE = "unavailable"
 
 
 # ── Sourcing ─────────────────────────────────────────────────────────────────
+# The single most recent GitHub-path failure reason, for surfacing in the UI.
+# Every prior failure mode — missing secrets, bad token, wrong repo, network
+# error, 404 on the wrong path — collapsed into a bare `None`, with the only
+# trace going to a server-side print() the user could never see from the
+# Streamlit UI. That ambiguity is what made this take three rounds to
+# diagnose. Never again: the reason is now visible on the actual error card.
+_last_github_reason = "not attempted"
+
+
 def _gh_list(path: str) -> list[str] | None:
-    """Filenames in a repo directory via the Contents API. None if unavailable."""
+    """Filenames in a repo directory via the Contents API. None if unavailable.
+
+    Sets `_last_github_reason` on every path so the caller can explain the
+    failure precisely rather than a generic "not found".
+    """
+    global _last_github_reason
     try:
         import requests
         import storage_backend as sb
         token, repo = sb._cfg("GITHUB_TOKEN"), sb._cfg("GITHUB_REPO")
         branch = sb._cfg("GITHUB_BRANCH", "main")
-        if not token or not repo:
+        if not token:
+            _last_github_reason = ("GITHUB_TOKEN not set in this app's "
+                                   "Streamlit secrets (separate from the "
+                                   "Portfolio-Tracker app's secrets — each "
+                                   "Streamlit deployment has its own).")
+            return None
+        if not repo:
+            _last_github_reason = "GITHUB_REPO not set in this app's secrets."
             return None
         r = requests.get(
             f"https://api.github.com/repos/{repo}/contents/{path}",
             headers=sb._gh_headers(token), params={"ref": branch}, timeout=20)
         if r.status_code == 404:
+            _last_github_reason = (f"GitHub returned 404 for repo='{repo}' "
+                                   f"branch='{branch}' path='{path}'. Secrets "
+                                   f"ARE set — but this exact path does not "
+                                   f"exist there. Check GITHUB_REPO is "
+                                   f"exactly 'owner/repo' and the path above "
+                                   f"matches where the workflow actually "
+                                   f"committed.")
             return []
+        if r.status_code == 401 or r.status_code == 403:
+            _last_github_reason = (f"GitHub returned {r.status_code} for "
+                                   f"repo='{repo}'. The token is set but "
+                                   f"invalid, expired, or lacks read access "
+                                   f"to this repo.")
+            return None
         r.raise_for_status()
+        _last_github_reason = f"OK — read {path} from {repo}@{branch}."
         return [i["name"] for i in r.json() if i.get("type") == "file"]
     except Exception as e:
+        _last_github_reason = f"{type(e).__name__}: {e}"
         print(f"[log_viewer] github list failed: {e}")
         return None
 
@@ -114,11 +150,30 @@ def list_reports() -> tuple[list[str], str]:
     names = _gh_list(_repo_path(SUMMARY_DIR))
     if names is not None and names:
         return sorted(names, reverse=True), SRC_GITHUB
-    if os.path.isdir(SUMMARY_DIR):
+    local_checked = os.path.isdir(SUMMARY_DIR)
+    if local_checked:
         local = sorted(os.listdir(SUMMARY_DIR), reverse=True)
         if local:
             return [n for n in local if n.endswith(".md")], SRC_LOCAL
     return [], SRC_NONE
+
+
+def diagnose() -> str:
+    """
+    Human-readable explanation of exactly why no report is showing, for the
+    error screen. This is the piece that turns 'still broken, guessing again'
+    into 'here is the specific reason, here is the specific fix'.
+    """
+    lines = [f"**GitHub read:** {_last_github_reason}"]
+    local_dir = os.path.isdir(SUMMARY_DIR)
+    lines.append(
+        f"**Local fallback:** checked `{os.path.abspath(SUMMARY_DIR)}` — "
+        + (f"exists, {len(os.listdir(SUMMARY_DIR))} file(s)."
+           if local_dir else
+           "directory does not exist in this deployment's checkout (expected "
+           "if Streamlit's working directory differs from where this repo's "
+           "logs/ actually lives, or the checkout predates the first commit)."))
+    return "\n\n".join(lines)
 
 
 def read_report(filename: str) -> tuple[str | None, str]:
@@ -180,12 +235,20 @@ def render(st):
 
     if source == SRC_NONE:
         st.error(
-            "**No reports found.** The scheduled log has not committed to "
-            "`logs/summaries/` yet.\n\n"
-            "Check: Actions → *Scheduled Checklist Logs* → has it run "
-            "successfully? A run can succeed while writing nothing if it "
-            "landed on a non-trading day without `LOG_FORCE`."
+            "**No reports found.** Either nothing has been committed yet, "
+            "or this app cannot reach where it was committed."
         )
+        with st.expander("🔍 Why — exact reason, not a guess", expanded=True):
+            st.markdown(diagnose())
+            st.caption(
+                "If GitHub read shows a token/secret problem: Settings → "
+                "Secrets in THIS Streamlit app specifically (every "
+                "deployment has its own, separate secrets box). If it shows "
+                "404 with secrets confirmed set: the repo/branch/path "
+                "resolved but that exact location is empty or wrong. If "
+                "GitHub succeeded but the report still isn't shown, the "
+                "issue is upstream — check Actions → *Markets Scheduled "
+                "Logs* directly.")
         return
 
     if source == SRC_LOCAL:
