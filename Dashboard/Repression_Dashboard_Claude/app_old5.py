@@ -1778,18 +1778,6 @@ def fed_balance_sheet_tab(raw: dict):
         raw["bs_rrp"]                 = rrp_s
         raw["bs_rrp_latest"]          = latest(rrp_s)
 
-        # 4-week trends for reserves and TGA -- same delta-over-4-weeks
-        # pattern already used for WALCL's wk4 below, applied to the two
-        # OTHER series the reserve-cushion tripwire needs.
-        def _4wk_chg(series):
-            sd = series.dropna()
-            if len(sd) < 5:
-                return None
-            return round((sd.iloc[-1] - sd.iloc[-5]) / 4 * 1000, 1)
-
-        raw["bs_reserves_4wk_bn"] = _4wk_chg(resbal_s)
-        raw["bs_tga_4wk_bn"]      = _4wk_chg(tga_s)
-
         if len(walcl_s) >= 2:
             wc = walcl_s.dropna()
             raw["bs_wow_change_bn"] = round((wc.iloc[-1] - wc.iloc[-2]) * 1000, 1)
@@ -1824,74 +1812,6 @@ def fed_balance_sheet_tab(raw: dict):
 
         loaded_bs  = [s for s in BS_SERIES if fetch_status.get(s, 0) > 0]
         missing_bs = [s for s in BS_SERIES if fetch_status.get(s, 0) == 0]
-
-        # ── Reserve cushion status ───────────────────────────────────────────
-        # Standalone function (tripwires.reserve_cushion), same one the
-        # regime tab's "what would change this call" panel uses -- shown here
-        # too since this is where the raw ingredients (RRP, reserves, TGA)
-        # already live, and a fresh call here needs no extra network fetch.
-        try:
-            import tripwires as _tw
-            _rc = _tw.reserve_cushion(
-                raw.get("bs_rrp_latest"),
-                raw.get("bs_reserves_4wk_bn"),
-                raw.get("bs_tga_4wk_bn"))
-            if _rc is not None:
-                _rc_colour = {"CRITICAL": "#e05252", "HIGH": "#d4913a",
-                             "MEDIUM": "#5a9e47"}.get(_rc["severity"], "#5c6475")
-                st.markdown(
-                    f'<div style="background:#13161b;border:1px solid #242830;'
-                    f'border-left:4px solid {_rc_colour};border-radius:10px;'
-                    f'padding:.85rem 1.25rem;margin:.6rem 0;">'
-                    f'<span style="font-size:.88rem;font-weight:700;'
-                    f'color:{_rc_colour};">Reserve cushion: {_rc["severity"]}'
-                    f'</span><br><span style="font-size:.78rem;color:#9aa3b2;">'
-                    f'{_rc["note"]}</span></div>', unsafe_allow_html=True)
-        except Exception as _e:
-            st.caption(f"⚠ Reserve cushion status unavailable: {_e}")
-
-        # ── Money supply (M2) — CONTEXT ONLY, never a trigger ────────────────
-        # Genuinely mixed evidence on M2 as a market-timing signal: the
-        # widely-repeated "M2 leads inflation with a lag" framework from
-        # 2020-2022 broke down materially in 2022-2023 (M2 growth decelerated
-        # sharply while CPI stayed elevated well past what naive M2-lag
-        # models predicted, then M2 sat flat-to-declining for stretches while
-        # asset prices kept climbing). M2 is also mechanically downstream of
-        # the SAME reserve/TGA/RRP dynamics already tracked above, plus bank
-        # credit creation -- real redundancy risk, not obviously new
-        # information. Shown as thematic context on the SAME liquidity
-        # backdrop, deliberately NOT wired into the regime classifier and
-        # given NO tripwire threshold -- same discipline already applied to
-        # curve inversions and CAPE elsewhere in this framework.
-        st.markdown("---")
-        st.markdown("##### Money supply (M2) — context, not a signal")
-        try:
-            m2_s = _bs_inline("M2SL", 1e3)
-            if len(m2_s) > 13:
-                m2_now = latest(m2_s)
-                m2d = m2_s.dropna()
-                m2_yoy = (round((m2d.iloc[-1] / m2d.iloc[-13] - 1) * 100, 1)
-                          if len(m2d) >= 13 else None)
-                c1, c2 = st.columns(2)
-                c1.metric("M2 money supply", f"${m2_now:.2f}T" if m2_now else "N/A")
-                c2.metric("M2 YoY growth",
-                         f"{m2_yoy:+.1f}%" if m2_yoy is not None else "N/A")
-                st.caption(
-                    "The 'M2 leads inflation/markets' relationship popularized "
-                    "in 2020-2022 broke down materially afterward -- M2 growth "
-                    "decelerated sharply in 2022 while CPI stayed elevated far "
-                    "longer than naive lag models predicted. M2 is also "
-                    "mechanically related to the reserve/TGA/RRP dynamics "
-                    "above, not fully independent of them. Shown as backdrop "
-                    "context on the same liquidity conditions -- deliberately "
-                    "NOT a classifier input or a tripwire, the same treatment "
-                    "given to curve inversions and CAPE elsewhere in this "
-                    "framework."
-                )
-            else:
-                st.caption("M2SL fetch returned insufficient history.")
-        except Exception as _e:
-            st.caption(f"⚠ M2 unavailable: {_e}")
 
         if loaded_bs:
             st.success(f"✅ Fetched {len(loaded_bs)}/6 H.4.1 series successfully.")

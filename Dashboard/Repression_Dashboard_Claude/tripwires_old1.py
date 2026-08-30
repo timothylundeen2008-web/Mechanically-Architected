@@ -46,67 +46,6 @@ def _tw(name, value, threshold, distance, direction, severity, unit="%",
             "available": available}
 
 
-RRP_EXHAUSTED_BN = 50.0     # RRP once ran $2T+; under $50B is genuinely spent
-RESERVE_DRAIN_BN = -5.0     # same weekly threshold the H.4.1 posture uses
-
-
-def reserve_cushion(rrp_level: Optional[float],
-                    wresbal_4wk_chg: Optional[float],
-                    wtregen_4wk_chg: Optional[float]) -> Optional[dict]:
-    """
-    Standalone so the H.4.1 tab (which already fetches WRESBAL/WTREGEN/RRP
-    for its own KPI cards) can call this directly, without duplicating the
-    fetch or constructing the regime-classifier argument set build() needs.
-    build() also calls this internally, so the full tripwire panel and the
-    H.4.1 tab's own status line always agree -- one function, two call sites.
-
-    The textbook expectation is WRESBAL and WTREGEN moving OPPOSITE each
-    other: a falling TGA releases cash, which should show up as RISING
-    reserves. Seeing them fall TOGETHER means something else -- QT -- is
-    outpacing that release. Historically ON RRP absorbs QT's drain before it
-    ever touches bank reserves; once RRP is near zero, that cushion is gone
-    and QT flows through directly. This is the exact mechanical setup that
-    preceded the September 2019 repo-market spike.
-
-    Deliberately NOT a calibrated "ample reserves" dollar threshold -- the
-    Fed's own officials disagree on where that line sits, so pretending to
-    know it would overclaim precision this framework avoids everywhere else.
-    The actionable signal is the PATTERN (RRP exhausted + both falling
-    together), not a specific level.
-    """
-    if rrp_level is None:
-        return None
-    exhausted = rrp_level < RRP_EXHAUSTED_BN
-    both_falling = (wresbal_4wk_chg is not None and wtregen_4wk_chg is not None
-                    and wresbal_4wk_chg < RESERVE_DRAIN_BN
-                    and wtregen_4wk_chg < RESERVE_DRAIN_BN)
-    if exhausted and both_falling:
-        return _tw(
-            "Reserve cushion → exhausted, uncushioned drain", rrp_level,
-            RRP_EXHAUSTED_BN, rrp_level, "fall", CRITICAL, unit="$B",
-            note=(f"ON RRP ${rrp_level:,.0f}B (cushion exhausted) AND "
-                  f"reserves ({wresbal_4wk_chg:+,.1f}B/wk) and TGA "
-                  f"({wtregen_4wk_chg:+,.1f}B/wk) are falling TOGETHER — "
-                  f"the textbook pattern is opposite. QT is now draining "
-                  f"reserves uncushioned. This is the same mechanical setup "
-                  f"that preceded the September 2019 repo spike. Watch "
-                  f"SOFR vs IORB next — a widening spread is the confirming "
-                  f"signal, not this alone."))
-    if exhausted:
-        return _tw(
-            "Reserve cushion → exhausted", rrp_level, RRP_EXHAUSTED_BN,
-            rrp_level, "fall", HIGH, unit="$B",
-            note=(f"ON RRP ${rrp_level:,.0f}B — cushion exhausted, but "
-                  f"reserves and TGA aren't yet confirming an uncushioned "
-                  f"drain together. Watch for both to turn negative at "
-                  f"once."))
-    return _tw(
-        "Reserve cushion → exhausted", rrp_level, RRP_EXHAUSTED_BN,
-        rrp_level - RRP_EXHAUSTED_BN, "fall", MEDIUM, unit="$B",
-        note=(f"${rrp_level:,.0f}B of RRP cushion remains to absorb "
-              f"TGA/QT swings before reserves feel it directly."))
-
-
 def build(sig=None, growth: Optional[dict] = None,
           cape: Optional[float] = None,
           top20_concentration_pct: Optional[float] = None,
@@ -115,10 +54,7 @@ def build(sig=None, growth: Optional[dict] = None,
           gold_price: Optional[float] = None,
           gold_200d: Optional[float] = None,
           gold_200d_rising: Optional[bool] = None,
-          curve: Optional[dict] = None,
-          rrp_level: Optional[float] = None,
-          wresbal_4wk_chg: Optional[float] = None,
-          wtregen_4wk_chg: Optional[float] = None) -> list[dict]:
+          curve: Optional[dict] = None) -> list[dict]:
     """
     Build the full tripwire list. Every argument optional; anything missing
     renders as unavailable rather than being skipped silently.
@@ -177,24 +113,6 @@ def build(sig=None, growth: Optional[dict] = None,
                       + ("positive" if srr > 0 else "negative")
                       + f". Would need to move {back:.2f}pp to re-enter the "
                         f"ambiguous band.")))
-
-    # ── 2b. Reserve cushion — is QT draining reserves UNCUSHIONED? ──────────
-    # The textbook expectation is WRESBAL and WTREGEN moving OPPOSITE each
-    # other: a falling TGA releases cash, which should show up as RISING
-    # reserves. Seeing them fall TOGETHER means something else — QT — is
-    # outpacing that release. Historically the ON RRP facility absorbs QT's
-    # drain before it ever touches bank reserves; once RRP is near zero,
-    # that cushion is gone and QT flows through directly. This is the exact
-    # mechanical setup that preceded the September 2019 repo-market spike.
-    #
-    # Not a hard "ample reserves" dollar threshold -- the Fed's own officials
-    # disagree on where that line sits, so pretending to know it would
-    # overclaim precision this framework avoids everywhere else. The
-    # actionable signal here is the PATTERN (RRP exhausted + both falling
-    # together), not a calibrated level.
-    rc_tw = reserve_cushion(rrp_level, wresbal_4wk_chg, wtregen_4wk_chg)
-    if rc_tw is not None:
-        out.append(rc_tw)
 
     # ── 3. Gold momentum gate — Level-4 entry confirmation ──────────────────
     if gold_price is not None and gold_200d is not None:
