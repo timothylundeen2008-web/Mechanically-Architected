@@ -1825,6 +1825,73 @@ def fed_balance_sheet_tab(raw: dict):
         loaded_bs  = [s for s in BS_SERIES if fetch_status.get(s, 0) > 0]
         missing_bs = [s for s in BS_SERIES if fetch_status.get(s, 0) == 0]
 
+        # ── Reserve cushion status ───────────────────────────────────────────
+        # Standalone function (tripwires.reserve_cushion), same one the
+        # regime tab's "what would change this call" panel uses -- shown here
+        # too since this is where the raw ingredients (RRP, reserves, TGA)
+        # already live, and a fresh call here needs no extra network fetch.
+        try:
+            import tripwires as _tw
+            _rc = _tw.reserve_cushion(
+                raw.get("bs_rrp_latest"),
+                raw.get("bs_reserves_4wk_bn"),
+                raw.get("bs_tga_4wk_bn"))
+            if _rc is not None:
+                _rc_colour = {"CRITICAL": "#e05252", "HIGH": "#d4913a",
+                             "MEDIUM": "#5a9e47"}.get(_rc["severity"], "#5c6475")
+                st.markdown(
+                    f'<div style="background:#13161b;border:1px solid #242830;'
+                    f'border-left:4px solid {_rc_colour};border-radius:10px;'
+                    f'padding:.85rem 1.25rem;margin:.6rem 0;">'
+                    f'<span style="font-size:.88rem;font-weight:700;'
+                    f'color:{_rc_colour};">Reserve cushion: {_rc["severity"]}'
+                    f'</span><br><span style="font-size:.78rem;color:#9aa3b2;">'
+                    f'{_rc["note"]}</span></div>', unsafe_allow_html=True)
+        except Exception as _e:
+            st.caption(f"⚠ Reserve cushion status unavailable: {_e}")
+
+        # ── Money supply (M2) — CONTEXT ONLY, never a trigger ────────────────
+        # Genuinely mixed evidence on M2 as a market-timing signal: the
+        # widely-repeated "M2 leads inflation with a lag" framework from
+        # 2020-2022 broke down materially in 2022-2023 (M2 growth decelerated
+        # sharply while CPI stayed elevated well past what naive M2-lag
+        # models predicted, then M2 sat flat-to-declining for stretches while
+        # asset prices kept climbing). M2 is also mechanically downstream of
+        # the SAME reserve/TGA/RRP dynamics already tracked above, plus bank
+        # credit creation -- real redundancy risk, not obviously new
+        # information. Shown as thematic context on the SAME liquidity
+        # backdrop, deliberately NOT wired into the regime classifier and
+        # given NO tripwire threshold -- same discipline already applied to
+        # curve inversions and CAPE elsewhere in this framework.
+        st.markdown("---")
+        st.markdown("##### Money supply (M2) — context, not a signal")
+        try:
+            m2_s = _bs_inline("M2SL", 1e3)
+            if len(m2_s) > 13:
+                m2_now = latest(m2_s)
+                m2d = m2_s.dropna()
+                m2_yoy = (round((m2d.iloc[-1] / m2d.iloc[-13] - 1) * 100, 1)
+                          if len(m2d) >= 13 else None)
+                c1, c2 = st.columns(2)
+                c1.metric("M2 money supply", f"${m2_now:.2f}T" if m2_now else "N/A")
+                c2.metric("M2 YoY growth",
+                         f"{m2_yoy:+.1f}%" if m2_yoy is not None else "N/A")
+                st.caption(
+                    "The 'M2 leads inflation/markets' relationship popularized "
+                    "in 2020-2022 broke down materially afterward -- M2 growth "
+                    "decelerated sharply in 2022 while CPI stayed elevated far "
+                    "longer than naive lag models predicted. M2 is also "
+                    "mechanically related to the reserve/TGA/RRP dynamics "
+                    "above, not fully independent of them. Shown as backdrop "
+                    "context on the same liquidity conditions -- deliberately "
+                    "NOT a classifier input or a tripwire, the same treatment "
+                    "given to curve inversions and CAPE elsewhere in this "
+                    "framework."
+                )
+            else:
+                st.caption("M2SL fetch returned insufficient history.")
+        except Exception as _e:
+            st.caption(f"⚠ M2 unavailable: {_e}")
 
         if loaded_bs:
             st.success(f"✅ Fetched {len(loaded_bs)}/6 H.4.1 series successfully.")
@@ -1871,244 +1938,6 @@ def fed_balance_sheet_tab(raw: dict):
     rrp          = raw.get("bs_rrp_latest")            # billions
     wow_change   = raw.get("bs_wow_change_bn")         # billions WoW change
     drawdown     = raw.get("bs_drawdown_pct")          # % from peak
-
-    # ── Reserve cushion status + Money supply (M2) ──────────────────────────
-    # v2 FIX: this used to live inside the `if not fetch_status...:` branch
-    # above, which only executes on a COLD cache -- bs_fetch_status is only
-    # ever written INSIDE that same branch, so the moment it's cached into
-    # st.session_state, every later rerun takes the elif/else path instead
-    # and this code silently never ran again for the rest of the session.
-    # No error, nothing visibly broken -- it just stopped rendering, which is
-    # exactly what "I don't see any rendering of the values" looks like from
-    # the outside.
-    #
-    # Fix: moved to this CONVERGED point (reached regardless of which branch
-    # populated the data above) and made fully self-contained -- its own
-    # fetch, not dependent on locally-scoped variables (_bs_inline, resbal_s,
-    # tga_s) that only exist inside the fallback branch's own scope.
-    _rc_key = _resolve_fred_key()
-
-    def _bs_fresh(series_id, divisor, start="2019-01-01"):
-        try:
-            s_ = fetch_fred(series_id, _rc_key, start)
-            return (s_ / divisor) if s_ is not None and len(s_) > 0 else pd.Series(dtype=float)
-        except Exception:
-            return pd.Series(dtype=float)
-
-    try:
-        import tripwires as _tw
-        _resbal_fresh = _bs_fresh("WRESBAL", 1e3)
-        _tga_fresh = _bs_fresh("WTREGEN", 1e3)
-
-        def _4wk(series):
-            sd = series.dropna()
-            return (round((sd.iloc[-1] - sd.iloc[-5]) / 4 * 1000, 1)
-                    if len(sd) >= 5 else None)
-
-        _rc = _tw.reserve_cushion(rrp, _4wk(_resbal_fresh), _4wk(_tga_fresh))
-        if _rc is not None:
-            _rc_colour = {"CRITICAL": "#e05252", "HIGH": "#d4913a",
-                         "MEDIUM": "#5a9e47"}.get(_rc["severity"], "#5c6475")
-            st.markdown(
-                f'<div style="background:#13161b;border:1px solid #242830;'
-                f'border-left:4px solid {_rc_colour};border-radius:10px;'
-                f'padding:.85rem 1.25rem;margin:.6rem 0;">'
-                f'<span style="font-size:.88rem;font-weight:700;'
-                f'color:{_rc_colour};">Reserve cushion: {_rc["severity"]}'
-                f'</span><br><span style="font-size:.78rem;color:#9aa3b2;">'
-                f'{_rc["note"]}</span></div>', unsafe_allow_html=True)
-        else:
-            st.caption("Reserve cushion status unavailable — RRP level not "
-                      "returned by FRED on this fetch.")
-    except Exception as _e:
-        st.caption(f"⚠ Reserve cushion status unavailable: {_e}")
-
-    st.markdown("---")
-    st.markdown("##### Money supply — context, not a signal")
-    st.caption(
-        "Every metric below is thematic backdrop on the same liquidity "
-        "conditions the balance sheet and reserve cushion above already "
-        "track. Deliberately NOT a classifier input and NOT a tripwire — "
-        "same treatment already given to curve inversions and CAPE "
-        "elsewhere in this framework. Full definitions and interpretation "
-        "notes are in the expander at the bottom of this section — read "
-        "those before treating any number here as decisive."
-    )
-    try:
-        m1_s = _bs_fresh("M1SL", 1e3)
-        m2_s = _bs_fresh("M2SL", 1e3)
-        gdp_s = _bs_fresh("GDP", 1e3)          # nominal GDP, quarterly, SAAR
-        cpi_s = _bs_fresh("CPIAUCNS", 1)       # NSA, per this framework's own
-                                                # hard rule — never CPIAUCSL
-                                                # for real-rate/real-growth math
-
-        if len(m2_s) <= 13:
-            st.caption("M2SL fetch returned insufficient history.")
-        else:
-            m2d, m1d = m2_s.dropna(), m1_s.dropna()
-            m2_now = float(m2d.iloc[-1])
-            m2_yoy = round((m2d.iloc[-1] / m2d.iloc[-13] - 1) * 100, 1)
-            m2_3m_saar = (round(((m2d.iloc[-1] / m2d.iloc[-4]) ** 4 - 1) * 100, 1)
-                         if len(m2d) >= 4 else None)
-            m1_now = float(m1d.iloc[-1]) if len(m1d) else None
-
-            # Real M2 growth = nominal M2 YoY minus CPI YoY (NSA). The
-            # headline metric of this section — see the expander for why.
-            cpi_yoy_local = None
-            if len(cpi_s.dropna()) >= 13:
-                cd = cpi_s.dropna()
-                cpi_yoy_local = round((cd.iloc[-1] / cd.iloc[-13] - 1) * 100, 1)
-            real_m2_yoy = (round(m2_yoy - cpi_yoy_local, 1)
-                          if cpi_yoy_local is not None else None)
-
-            # Velocity = nominal GDP (already annual-rate) / M2 stock.
-            # GDP is quarterly and lags — its own "as of" date is shown
-            # explicitly so it never looks as fresh as the monthly M2 figure.
-            velocity, gdp_asof, m2_gdp_ratio = None, None, None
-            if len(gdp_s.dropna()) > 0:
-                gd = gdp_s.dropna()
-                gdp_latest = float(gd.iloc[-1])
-                gdp_asof = gd.index[-1].strftime("%b %Y")
-                # M2 as of the SAME month as the GDP print, not today's M2 —
-                # comparing a quarterly-lagged GDP to today's M2 would
-                # silently distort the ratio.
-                m2_at_gdp_date = m2d.asof(gd.index[-1])
-                if m2_at_gdp_date and m2_at_gdp_date > 0:
-                    # M2/GDP derived DIRECTLY from velocity's own unrounded
-                    # value, not as a second, independent division -- two
-                    # separately-rounded divisions can drift apart by a
-                    # rounding hair, which would contradict "M2/GDP is the
-                    # explicit reciprocal of velocity" rather than just a
-                    # second number that happens to be close.
-                    _velocity_raw = gdp_latest / m2_at_gdp_date
-                    velocity = round(_velocity_raw, 3)
-                    m2_gdp_ratio = round(1.0 / _velocity_raw, 3)
-
-            # ── Levels + trend history ───────────────────────────────────────
-            c1, c2 = st.columns(2)
-            c1.metric("M2 money supply", f"${m2_now:.2f}T")
-            c2.metric("M1 money supply", f"${m1_now:.2f}T" if m1_now else "N/A")
-            if len(m2d) > 24:
-                _trend_df = pd.DataFrame({
-                    "M2 ($T)": m2d.tail(120),
-                    "M1 ($T)": m1d.reindex(m2d.tail(120).index, method="nearest")
-                              if len(m1d) else None,
-                }).dropna(how="all", axis=1)
-                st.line_chart(_trend_df, height=220)
-                st.caption("Trailing ~10 years, monthly. M1's 2020 discontinuity "
-                          "(see definitions below) will show as a visible step, "
-                          "not organic growth.")
-
-            # ── Growth rates ────────────────────────────────────────────────
-            st.markdown("**Growth rates**")
-            g1, g2, g3 = st.columns(3)
-            g1.metric("M2 YoY (nominal)", f"{m2_yoy:+.1f}%")
-            g2.metric("M2 3M SAAR", f"{m2_3m_saar:+.1f}%" if m2_3m_saar is not None else "N/A",
-                     help="Annualised 3-month pace — the leading read, same "
-                          "convention as this dashboard's CPI 3M SAAR. Compare "
-                          "against YoY to see whether the pace is "
-                          "accelerating or decelerating right now.")
-            g3.metric("M2 real YoY growth",
-                     f"{real_m2_yoy:+.1f}%" if real_m2_yoy is not None else "N/A",
-                     help="Nominal M2 YoY minus CPI YoY (NSA). The headline "
-                          "number in this section — see definitions below.")
-
-            # ── Velocity ────────────────────────────────────────────────────
-            st.markdown("**Velocity**")
-            v1, v2 = st.columns(2)
-            v1.metric("M2 velocity", f"{velocity:.3f}" if velocity else "N/A",
-                     help=f"Nominal GDP ÷ M2, as of {gdp_asof or 'N/A'} "
-                          f"(GDP's own release date — quarterly, always "
-                          f"lags the monthly M2 figures above).")
-            v2.metric("M2 / GDP", f"{m2_gdp_ratio:.3f}" if m2_gdp_ratio else "N/A",
-                     help="= 1 / velocity, shown as its reciprocal. NOT an "
-                          "independent signal from velocity — the two numbers "
-                          "carry identical information.")
-            if gdp_asof:
-                st.caption(f"Velocity and M2/GDP are as of {gdp_asof} — GDP's "
-                          f"own quarterly cadence, not today's date. They will "
-                          f"look stale relative to the monthly figures above "
-                          f"by design; that's GDP's reporting lag, not a bug.")
-
-            # ── Definitions & interpretation ────────────────────────────────
-            with st.expander("📖 Definitions and how to read these correctly"):
-                st.markdown(
-"""
-**M1** — physical currency in circulation plus demand deposits (checking
-accounts), and since May 2020 also includes savings deposits, which the Fed
-folded into M1 by reclassification, not by any actual change in money
-creation. That reclassification produced a large, visible, artificial jump
-in the M1 series in 2020 — the step you'll see in the trend chart above is
-a definitional change, not real growth. **Treat M1 level comparisons across
-that date as not directly comparable.**
-
-**M2** — M1 plus savings accounts, small time deposits (under $100k), and
-retail money market funds. Broader and more stable than M1; the more
-commonly referenced "money supply" figure in financial commentary and the
-one this framework treats as primary.
-
-**M2 YoY growth** — straightforward 12-month change. Useful for the big
-picture, but lags real-time conditions by design — a shift in the pace of
-money creation only shows up here months after it starts.
-
-**M2 3-month SAAR** — the last 3 months' pace, annualised
-(`((M2_now/M2_3mo_ago)^4 − 1) × 100`). The LEADING read: an inflection in
-money-supply growth shows up here well before it moves the trailing YoY
-number. Same construction as this dashboard's CPI 3M SAAR, for the same
-reason — the trailing figure is the lagging confirmation, the SAAR is the
-early signal.
-
-**Real M2 growth (nominal minus CPI YoY)** — the most analytically useful
-number in this section. In 2022, nominal M2 growth was still slightly
-positive while CPI ran far hotter, so real M2 growth went negative for the
-first time in decades — arguably a better read than the "M2 leads
-inflation" framework that was popular at the time, since the negative real
-print preceded the disinflation that followed. A negative real M2 growth
-rate means the money stock is shrinking in purchasing-power terms even if
-the nominal number looks fine — a genuine tightening of financial
-conditions that the nominal figure alone hides.
-
-**M2 velocity (nominal GDP ÷ M2)** — how many times the money stock
-"turns over" into economic activity per year. Rising velocity means money
-is changing hands faster — each dollar of the money stock is supporting
-more transactions, generally associated with expansion or inflation
-pressure building. Falling velocity means money is being held rather than
-spent — hoarding, deleveraging, or precautionary saving. **Velocity fell
-sharply and stayed structurally low from 2008 through the 2020s** — a
-well-documented, still-debated phenomenon (low rates reducing the
-opportunity cost of holding cash, post-crisis deleveraging, and changed
-bank behavior are the leading explanations, with no full consensus). Do
-not assume velocity will mean-revert to pre-2008 levels; there's no strong
-evidence it will.
-
-**M2 / GDP** — literally `1 ÷ velocity`, shown for readers who find "money
-stock relative to the size of the economy" a more intuitive framing than
-velocity's inverse. **This is not a second, independent signal** — it will
-always move exactly opposite velocity, because they're the same fact
-expressed two ways.
-
-**Why GDP-based figures show an older date than M2 above them** — GDP is
-released quarterly, with an initial estimate followed by multiple
-revisions over the following months. Velocity and M2/GDP can only update
-once a quarter, no matter how often M2 itself refreshes monthly. The date
-label reflects GDP's own reporting lag; it is not evidence anything here
-is broken.
-
-**The standing caveat that applies to all of the above:** the widely
-repeated "M2 leads inflation/markets with a lag" framework popularized in
-2020–2022 broke down materially afterward — M2 growth decelerated sharply
-in 2022 while CPI stayed elevated well past what naive M2-lag models
-predicted, then M2 sat flat-to-declining for stretches while asset prices
-kept climbing regardless. M2 is also mechanically downstream of the same
-reserve/TGA/RRP dynamics already tracked above, plus bank credit creation
-— real redundancy risk with the reserve-cushion section, not obviously
-independent new information. Every metric here is context on the
-liquidity backdrop, not a timing signal, and none of it feeds this
-framework's regime classifier.
-"""
-                )
-    except Exception as _e:
-        st.caption(f"⚠ Money supply section unavailable: {_e}")
 
     def fmt_T(v):
         return f"${v:.2f}T" if v is not None else "N/A"
