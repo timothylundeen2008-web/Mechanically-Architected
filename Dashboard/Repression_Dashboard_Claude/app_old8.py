@@ -2172,33 +2172,9 @@ framework's regime classifier.
     #
     # v2 requires BOTH persistence (4-week average) AND magnitude, and adds
     # the reserve-management state that describes what is actually happening.
-    # v3 FIX: these were only ever SET inside the `if not fetch_status...:`
-    # once-only-per-session branch above (same root cause already found and
-    # fixed for the reserve-cushion status and Money Supply section). On any
-    # render after the first cold-cache one in a session, that branch is
-    # skipped, so raw.get(...) here returned None every time -- not just a
-    # cosmetic N/A, but the ENTIRE QE/QT posture verdict below running on
-    # missing inputs on every warm-cache render since this was built.
-    # Self-contained fresh fetch here, independent of which branch of the
-    # if/elif/else above actually populated the cache.
-    _walcl_fresh = _bs_fresh("WALCL", 1e6)
-    _wc = _walcl_fresh.dropna()
-    wk4 = wk13 = yr52 = None
-    if len(_wc) >= 5:
-        wk4 = round((_wc.iloc[-1] - _wc.iloc[-5]) / 4 * 1000, 1)
-    if len(_wc) >= 14:
-        wk13 = round((_wc.iloc[-1] - _wc.iloc[-14]) / 13 * 1000, 1)
-    if len(_wc) >= 53:
-        yr52 = round((_wc.iloc[-1] - _wc.iloc[-53]) * 1000, 1)
-    # Fall back to whatever the once-only branch may have set, only if the
-    # fresh fetch itself failed entirely -- never silently prefer stale
-    # session-cached numbers over a fresh read that succeeded.
-    if wk4 is None:
-        wk4 = raw.get("bs_4wk_avg_bn")
-    if wk13 is None:
-        wk13 = raw.get("bs_13wk_avg_bn")
-    if yr52 is None:
-        yr52 = raw.get("bs_52wk_change_bn")
+    wk4  = raw.get("bs_4wk_avg_bn")
+    wk13 = raw.get("bs_13wk_avg_bn")
+    yr52 = raw.get("bs_52wk_change_bn")
 
     # ~$20B/wk ≈ $1T/yr — a genuine QE pace. ~$5B/wk ≈ $260B/yr — the
     # reserve-management band the Fed has been running.
