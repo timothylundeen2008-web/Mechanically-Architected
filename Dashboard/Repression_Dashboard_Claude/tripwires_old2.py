@@ -269,44 +269,6 @@ def build(sig=None, growth: Optional[dict] = None,
                       "most violent regime-shift signal there is, warranting "
                       "immediate review rather than the weekly cycle.")))
 
-    # ── 4c. Dollar / long-yield divergence — term premium repricing ────────
-    # The signature that separates "yields rose because growth/inflation" from
-    # "yields rose because buyers demand compensation to hold the paper at
-    # all". Higher yields normally ATTRACT foreign capital and support the
-    # currency; when yields rise and the dollar FALLS together, that link has
-    # broken. Shown here whether or not the term_premium_repricing regime is
-    # actually firing, because the divergence is informative on its own --
-    # it can be present while other conditions (credit, the short real rate)
-    # keep the classifier in a different branch.
-    _dxy = g("dxy")
-    _dxy_chg = g("dxy_20d_change_pct")
-    _long_mom = g("long_real_mom_3m")
-    if _dxy_chg is not None and _long_mom is not None:
-        diverging = _long_mom > 0 and _dxy_chg <= -1.0
-        if diverging:
-            out.append(_tw(
-                "Dollar/yield divergence → ACTIVE", _dxy_chg, -1.0, 0.0,
-                "already tripped", HIGH, unit="%",
-                note=(f"Long real yields RISING ({_long_mom:+.2f}pp/3mo) "
-                      f"while the dollar FELL {_dxy_chg:+.1f}% over ~1 "
-                      f"month. Higher yields are failing to attract the "
-                      f"capital they normally would — this prices fiscal / "
-                      f"credibility risk rather than growth or inflation. "
-                      f"Long duration is the direct loser. Watch whether "
-                      f"HY OAS eventually confirms what rates are already "
-                      f"pricing; if credit stays calm this stays a "
-                      f"repricing rather than a credit event.")))
-        else:
-            out.append(_tw(
-                "Dollar/yield divergence", _dxy_chg, -1.0,
-                abs(_dxy_chg - (-1.0)), "fall", MEDIUM, unit="%",
-                note=(f"Dollar {_dxy_chg:+.1f}% over ~1 month with long real "
-                      f"yields {_long_mom:+.2f}pp/3mo. "
-                      + ("Yields rising but the dollar is holding — ordinary "
-                         "tightening, not a credibility repricing."
-                         if _long_mom and _long_mom > 0 else
-                         "No divergence: yields are not rising."))))
-
     # ── 5. Valuation guard — what would UNBLOCK goldilocks ──────────────────
     if cape is not None:
         out.append(_tw(

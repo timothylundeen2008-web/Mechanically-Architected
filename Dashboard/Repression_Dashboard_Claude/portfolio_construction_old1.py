@@ -94,21 +94,6 @@ REGIME_THESIS = {
                           "the most — which is precisely why it carries three "
                           "independent guards.",
     },
-    "term_premium_repricing": {
-        "bet": "Positive short real rates with a RISING long end and a "
-               "FALLING dollar — higher yields failing to attract capital, "
-               "which prices fiscal/credibility risk rather than growth.",
-        "wrong_if": "The dollar stabilises or the long end stops rising — "
-                    "either would make this ordinary tightening rather than "
-                    "a credibility repricing. Also wrong if credit cracks, "
-                    "which would make it a liquidity crisis instead.",
-        "crash_exposure": "Long duration is the DIRECT loser here, not the "
-                          "hedge — TLT is cut hardest of any regime. Real "
-                          "assets and trend carry the diversification load. "
-                          "The tail risk is that credit eventually confirms "
-                          "what rates are pricing, at which point this "
-                          "becomes liquidity_crisis and duration re-arms.",
-    },
     "growth_scare": {
         "bet": "Labour and consumer data contracting together, independent of "
                "the real-rate sign.",

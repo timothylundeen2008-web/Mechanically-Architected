@@ -319,10 +319,6 @@ def _quadrant_table(active_key):
         "stagflation": "short real −  ·  2s10s re-steepening",
         "goldilocks": "short real +  ·  credit tight  ·  leadership intact  ·  "
                      "valuation/concentration in range",
-        "term_premium_repricing": "short real +  ·  long real ↑  ·  DOLLAR ↓  "
-                                  "·  credit calm — the INVERSE of repression",
-        "growth_scare": "growth composite CONTRACTING — independent of the "
-                       "real-rate sign",
         "transition_ambiguous": "short real WITHIN ±0.25% band — gauge silent",
         "neutral": "signals mixed / no dominant driver",
     }

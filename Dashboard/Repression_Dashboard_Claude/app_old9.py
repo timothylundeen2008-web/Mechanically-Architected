@@ -1118,15 +1118,8 @@ def main():
                     _rs = _rs_mod.rank_universe(_fp, _universe)
                     _tr = _tf.assess_universe(_fp, _universe)
                 _reg_key = (_regime_out or {}).get("regime", {}).get("key", "")
-                # A CONFIRMED regime is any state the classifier positively
-                # named -- including term_premium_repricing and growth_scare,
-                # which are as definite a read as goldilocks. Only the
-                # transition/neutral states are genuinely unconfirmed. Missing
-                # a regime here silently caps conviction scoring at 2/3.
                 _confirmed = _reg_key in ("goldilocks", "inflationary_repression",
-                                          "hard_repression", "stagflation",
-                                          "term_premium_repricing",
-                                          "growth_scare", "liquidity_crisis")
+                                          "hard_repression", "stagflation")
                 _conv = {}
                 for tk in _universe:
                     _conv[tk] = _ps.score_conviction(
