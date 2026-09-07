@@ -1925,28 +1925,14 @@ def fed_balance_sheet_tab(raw: dict):
 
     st.markdown("---")
     st.markdown("##### Money supply — context, not a signal")
-    st.warning(
-        "⚠ **For the direct, precise, weekly signal of Fed money "
-        "printing, see Total Assets / Bank Reserves further down this "
-        "page, not M1/M2 here.** QE is the Fed expanding its OWN balance "
-        "sheet — those numbers ARE that expansion, weekly, unmixed with "
-        "anything else. M1 and M2 below are downstream: monthly, and "
-        "blended with fiscal policy and ordinary bank lending, which is "
-        "exactly why M1 and M2 can tell visibly different stories about "
-        "the same period — M1's faster, more liquid composition reacts "
-        "more sharply than M2's stickier, savings-heavy mix, but neither "
-        "is a cleaner read on Fed purchases specifically than the "
-        "balance-sheet numbers themselves."
-    )
     st.caption(
         "Every metric below is thematic backdrop on the same liquidity "
-        "conditions the balance sheet and reserve cushion (further down "
-        "this page) already track more directly. Deliberately NOT a "
-        "classifier input and NOT a tripwire — same treatment already "
-        "given to curve inversions and CAPE elsewhere in this framework. "
-        "Full definitions and interpretation notes are in the expander "
-        "at the bottom of this section — read those before treating any "
-        "number here as decisive."
+        "conditions the balance sheet and reserve cushion above already "
+        "track. Deliberately NOT a classifier input and NOT a tripwire — "
+        "same treatment already given to curve inversions and CAPE "
+        "elsewhere in this framework. Full definitions and interpretation "
+        "notes are in the expander at the bottom of this section — read "
+        "those before treating any number here as decisive."
     )
     try:
         m1_s = _bs_fresh("M1SL", 1e3)
@@ -2060,25 +2046,6 @@ that date as not directly comparable.**
 retail money market funds. Broader and more stable than M1; the more
 commonly referenced "money supply" figure in financial commentary and the
 one this framework treats as primary.
-
-**Why M1 and M2 can look meaningfully different over the SAME period —
-2021-2022 is a real example, not noise.** Neither is a direct measure of
-Fed money printing; both are downstream of it (see the direct signal
-further down this page: Total Assets and Bank Reserves). But they're
-downstream in DIFFERENT ways. M1 is the most liquid slice — cash and
-checking balances — so it reacts fastest when stimulus lands directly in
-spendable accounts, and reacts fastest again when that money gets spent or
-drawn back down. M2 adds savings accounts and money-market funds, where a
-real portion of 2020-2021 stimulus was PARKED rather than spent —
-households and businesses held it rather than immediately deploying it.
-That's why M1 can look sharper and more transient across a period like
-2021-2022 while M2 looks smoother and stickier over the same stretch: it's
-a genuine difference in how liquid the underlying money is, not a flaw in
-either series. Neither is "more correct" — they're answering "how much
-directly spendable cash exists" (M1) versus "how much money exists across
-spendable AND parked forms" (M2), which is a different question from
-"how much did the Fed print," answered more precisely by the balance-sheet
-numbers below.
 
 **M2 YoY growth** — straightforward 12-month change. Useful for the big
 picture, but lags real-time conditions by design — a shift in the pace of
@@ -2211,25 +2178,6 @@ framework's regime classifier.
     if yr52 is not None:
         bs_signal_note += (f" 52-week change {yr52:+,.0f}B "
                           f"({yr52/6760:+.1f}% of the current sheet).")
-
-    # ── The direct signal, explained ─────────────────────────────────────────
-    # Added per a direct question: why does M1 look like a cleaner "money
-    # printing" signal than M2 around 2021-2022? Answer -- neither M1 nor M2
-    # IS the printing; both are downstream of it. The five numbers below ARE
-    # the printing itself, not an inference from it.
-    st.info(
-        "💡 **This row is the direct signal.** QE is defined as the Fed "
-        "expanding its own balance sheet — Total Assets and Bank Reserves "
-        "below don't infer that expansion, they ARE it. Weekly, and "
-        "unmixed with anything else. M1/M2 (Money Supply, above on this "
-        "page) are downstream: monthly instead of weekly, and blended with "
-        "fiscal policy and ordinary bank lending, which is exactly why "
-        "M1 and M2 can tell different stories about the same period — "
-        "M1's 2020 reclassification and its more liquid, faster-reacting "
-        "composition make it swing more visibly than M2's stickier, "
-        "savings-heavy mix, but neither is measuring the Fed's own "
-        "purchases as directly as what's below."
-    )
 
     # ── Top KPI row ─────────────────────────────────────────────────────────────
     k1, k2, k3, k4, k5 = st.columns(5)
