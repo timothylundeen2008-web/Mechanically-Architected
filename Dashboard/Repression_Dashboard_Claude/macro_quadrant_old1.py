@@ -265,13 +265,13 @@ def classify(growth: Optional[dict] = None,
         g_dir = "rising"
     elif g_state in GROWTH_DOWN_STATES:
         g_dir = "falling"
-    elif g_state == "NEUTRAL":
+    elif g_state == "STABLE":
         g_dir = "flat"
     else:
         g_dir = None
         out["missing"].append("growth composite")
     out["growth_axis"] = {"direction": g_dir, "state": g_state,
-                          "confirmed": g_confirmed, "score": (growth or {}).get("score"),
+                          "confirmed": g_confirmed,
                           "detail": (growth or {}).get("detail")}
     if g_state:
         out["evidence"].append(
@@ -304,10 +304,8 @@ def classify(growth: Optional[dict] = None,
                 f"Inflation direction inferred from 10y breakeven "
                 f"{breakeven_10y:.2f}% vs trailing CPI {cpi_yoy:.2f}% — "
                 f"WEAKER evidence than the 3M SAAR comparison.")
-    _delta = ((cpi_3m_saar - cpi_yoy) if (cpi_3m_saar is not None and cpi_yoy is not None)
-              else None)
     out["inflation_axis"] = {"direction": i_dir, "cpi_yoy": cpi_yoy,
-                             "cpi_3m_saar": cpi_3m_saar, "delta_pp": _delta,
+                             "cpi_3m_saar": cpi_3m_saar,
                              "breakeven_10y": breakeven_10y}
 
     # ── Place in a box ──────────────────────────────────────────────────────
@@ -378,23 +376,6 @@ def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = Non
 
     if q.get("blurb"):
         st.caption(q["blurb"])
-
-    try:
-        import macro_quadrant_chart as _chart
-        _svg = _chart.build(
-            quadrant=q.get("quadrant"),
-            growth_score=q["growth_axis"].get("score"),
-            inflation_delta_pp=q["inflation_axis"].get("delta_pp"),
-            confidence=q["confidence"],
-            gdp_direction=(gdp or {}).get("gdp_direction"))
-        st.markdown(_svg, unsafe_allow_html=True)
-        st.caption("Solid dot: current reading (size/opacity = confidence). "
-                   "Dashed ring: where GDPNow/realised GDP alone would place "
-                   "the growth axis, at the same inflation reading — a gap "
-                   "between the two is the composite and its anchor "
-                   "disagreeing, visibly.")
-    except Exception as _e:
-        st.caption(f"Chart unavailable: {_e}")
 
     c1, c2 = st.columns(2)
     ga, ia = q["growth_axis"], q["inflation_axis"]
