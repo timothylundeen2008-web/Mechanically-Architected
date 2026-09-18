@@ -311,34 +311,18 @@ def classify(growth: Optional[dict] = None,
                              "breakeven_10y": breakeven_10y}
 
     # ── Place in a box ──────────────────────────────────────────────────────
-    # v2 FIX: "flat" must NEVER be bundled with a directional neighbour on
-    # EITHER axis. It was previously grouped with "rising" for growth,
-    # which let the label say e.g. Goldilocks while the dot -- drawn from
-    # the raw continuous score, which gets no such bundling -- could still
-    # plot in the OPPOSITE half whenever score was flat-but-slightly-
-    # negative (NEUTRAL spans -1/0/+1). Caught directly: score=-1 (NEUTRAL,
-    # so "flat") labelled Goldilocks while visually plotting below the
-    # center line, in Deflation's half. A genuinely flat reading is
-    # ambiguous about which half it belongs to; forcing it into the
-    # "nicer" box overclaims precision the data doesn't have, and now
-    # disagrees with where the dot is actually drawn. Symmetric ambiguity
-    # on both axes keeps the label and the dot's position always
-    # consistent -- if either is flat, the box is genuinely undetermined.
-    if g_dir == "rising" and i_dir == "rising":
+    if g_dir in ("rising", "flat") and i_dir == "rising":
         q = REFLATION
-    elif g_dir == "rising" and i_dir == "falling":
+    elif g_dir in ("rising", "flat") and i_dir == "falling":
         q = GOLDILOCKS_Q
     elif g_dir == "falling" and i_dir == "rising":
         q = STAGFLATION_Q
-    elif g_dir == "falling" and i_dir == "falling":
+    elif g_dir == "falling" and i_dir in ("falling", "flat"):
         q = DEFLATION
-    elif g_dir == "flat" or i_dir == "flat":
+    elif g_dir == "flat" and i_dir == "flat":
         q = None
-        out["evidence"].append(
-            f"{'Growth' if g_dir=='flat' else 'Inflation'} is flat — "
-            f"genuinely ambiguous which box this belongs to, not forced "
-            f"into either neighbour. The dot's position reflects this "
-            f"directly rather than the label overclaiming a side.")
+        out["evidence"].append("Both axes flat — genuinely between boxes. "
+                               "That is a real reading, not a failure.")
     else:
         q = None
 
@@ -487,8 +471,7 @@ def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = Non
 
 def selftest() -> dict:
     f = []
-    G = lambda s, c=True, score=None: {"state": s, "confirmed": c,
-                                       "detail": "test", "score": score}
+    G = lambda s, c=True: {"state": s, "confirmed": c, "detail": "test"}
 
     # Four corners
     cases = [
@@ -556,34 +539,6 @@ def selftest() -> dict:
     # nowcast preferred over realised for direction
     if a2.get("gdp_direction_source") != "GDPNow":
         f.append("nowcast must be preferred over realised for the direction read")
-
-    # v2 FIX regression: "flat" must NEVER be bundled with a directional
-    # neighbour, on EITHER axis -- this is the exact bug a live screenshot
-    # caught (score=-1, NEUTRAL/"flat", labelled Goldilocks while the dot
-    # plotted in Deflation's half because the raw score was negative).
-    flat_growth_falling_infl = classify(growth=G("NEUTRAL", True, score=-1),
-                                        cpi_yoy=3.40, cpi_3m_saar=0.18)
-    if flat_growth_falling_infl["quadrant"] is not None:
-        f.append(f"flat growth (even clearly-directional inflation) must be "
-                f"ambiguous, got {flat_growth_falling_infl['quadrant']}")
-    # And the reverse: clear growth, flat inflation -- also ambiguous
-    flat_infl_rising_growth = classify(growth=G("EXPANDING", True),
-                                       cpi_yoy=3.00, cpi_3m_saar=3.05)
-    if flat_infl_rising_growth["quadrant"] is not None:
-        f.append(f"flat inflation (even clearly-directional growth) must be "
-                f"ambiguous, got {flat_infl_rising_growth['quadrant']}")
-    # The label and the dot's half must NEVER disagree: whenever a quadrant
-    # IS assigned, the sign of the score must match the box's own vertical
-    # half (top boxes = rising = score>0; bottom = falling = score<0).
-    for lbl, g_state, score in (("rising/rising", "EXPANDING", 3),
-                                ("falling/falling", "CONTRACTING", -3)):
-        r = classify(growth=G(g_state, True, score=score),
-                     cpi_yoy=(1.0 if score > 0 else 3.0),
-                     cpi_3m_saar=(3.0 if score > 0 else 1.0))
-        top_boxes = {REFLATION, GOLDILOCKS_Q}
-        if r["quadrant"] and ((score > 0) != (r["quadrant"] in top_boxes)):
-            f.append(f"label/dot half mismatch for {lbl}: score={score} "
-                    f"quadrant={r['quadrant']}")
 
     # Confidence ladder
     hi = classify(growth=G("EXPANDING", True), cpi_yoy=2.0, cpi_3m_saar=3.0)
