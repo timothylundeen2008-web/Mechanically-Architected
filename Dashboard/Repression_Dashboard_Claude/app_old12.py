@@ -1054,17 +1054,8 @@ def main():
             # disagreement means the proxy has stopped tracking -- or is
             # catching a turn GDP has not registered yet.
             _gdp = _mq.gdp_anchor(fetch_fred=_fred_adapter, api_key=fred_key,
-                                  composite_direction=_q["growth_axis"]["direction"],
-                                  growth=(_regime_out or {}).get("growth"))
-            # Persist today's reading (idempotent per day) so future sessions
-            # can see whether a disagreement is new or has persisted across
-            # multiple readings -- the one thing a single manual check can't
-            # see at all. Never blocks rendering if the write fails.
-            _mq.record_reading(composite_direction=_q["growth_axis"]["direction"],
-                               composite_score=_q["growth_axis"].get("score"),
-                               gdp=_gdp)
-            _persist = _mq.check_persistence()
-            _mq.render(st, _q, gdp=_gdp, persistence=_persist)
+                                  composite_direction=_q["growth_axis"]["direction"])
+            _mq.render(st, _q, gdp=_gdp)
             st.markdown("---")
             st.caption("**Below: the 9-regime classifier** — what specifically is "
                        "happening inside that box, and the actual weight tilts.")

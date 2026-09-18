@@ -62,7 +62,6 @@ THE DIRECTION-NOT-LEVEL RULE
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
 # ── The four boxes ──────────────────────────────────────────────────────────
@@ -164,8 +163,7 @@ GDP_CONTRACTING_PCT = 0.0
 
 
 def gdp_anchor(fetch_fred=None, api_key: str = "", start: str = "2015-01-01",
-               composite_direction: Optional[str] = None,
-               growth: Optional[dict] = None) -> dict:
+               composite_direction: Optional[str] = None) -> dict:
     """
     Fetch REALISED GDP growth (and GDPNow when available) and check whether
     the composite nowcast agrees with it.
@@ -235,193 +233,6 @@ def gdp_anchor(fetch_fred=None, api_key: str = "", start: str = "2015-01-01",
                            f"case near an inflection), or the composite has drifted "
                            f"and stopped tracking. Check which before trusting the "
                            f"quadrant.")
-
-    # ── Automated diagnosis, not just a note to go check manually ───────────
-    if out["agrees"] is False:
-        out["diagnosis"] = diagnose_disagreement(growth, out)
-    return out
-
-
-# ── Which specific input is driving the composite -- and is GDPNow itself ──
-# ── reliable right now? Automates the "how do I check this" question. ─────
-
-def vote_breakdown(growth: Optional[dict]) -> dict:
-    """
-    Which of the composite's 4 series actually agree with each other.
-
-    A UNANIMOUS composite (3-4 series pointing the same way) disagreeing with
-    GDPNow is a materially stronger "the composite may be right and early"
-    signal than a SPLIT composite (e.g. sentiment alone dragging a mixed
-    read to flat) disagreeing with the same GDPNow print — in the split
-    case, the disagreement is more likely explained by one noisy input
-    (commonly sentiment, which reacts to headlines faster than hard data)
-    rather than the whole composite genuinely leading.
-    """
-    votes = (growth or {}).get("votes") or []
-    pos = [v for v in votes if v.get("vote", 0) > 0]
-    neg = [v for v in votes if v.get("vote", 0) < 0]
-    neu = [v for v in votes if v.get("vote", 0) == 0]
-    n = len(votes)
-    out = {"n_series": n, "positive": pos, "negative": neg, "neutral": neu,
-          "unanimous": False, "outlier": None}
-    if n >= 3:
-        if len(pos) >= n - 1 and neg:
-            out["unanimous"] = False
-            out["outlier"] = neg[0]["name"]
-        elif len(neg) >= n - 1 and pos:
-            out["outlier"] = pos[0]["name"]
-        elif len(pos) == n or len(neg) == n:
-            out["unanimous"] = True
-    return out
-
-
-def gdpnow_reliability(asof_str: Optional[str]) -> dict:
-    """
-    GDPNow's own published behaviour: its estimate is most volatile in the
-    first few weeks of a quarter, before enough source data (retail sales,
-    trade, inventories) has actually arrived, and converges toward the
-    final print as the quarter progresses. A hot or cold GDPNow read taken
-    in the first ~3 weeks of a quarter carries materially less weight than
-    the identical read taken in the quarter's final month. This is the
-    Atlanta Fed's own stated caveat about their model, not a rule invented
-    here.
-    """
-    if not asof_str:
-        return {"days_into_quarter": None, "reliability": "unknown"}
-    try:
-        d = datetime.strptime(asof_str, "%d %b %Y")
-    except Exception:
-        return {"days_into_quarter": None, "reliability": "unknown"}
-    q_start_month = ((d.month - 1) // 3) * 3 + 1
-    q_start = datetime(d.year, q_start_month, 1)
-    days_in = (d - q_start).days
-    if days_in < 21:
-        rel = "LOW — early in the quarter; GDPNow is at its most volatile " \
-              "before enough source data has arrived. A large swing here is " \
-              "common and often reverses as more data lands."
-    elif days_in < 55:
-        rel = "MODERATE — mid-quarter; more source data has arrived but the " \
-              "estimate can still move meaningfully on the next few releases."
-    else:
-        rel = "HIGH — late in the quarter; GDPNow has converged on most of " \
-              "the quarter's actual source data and is close to its final read."
-    return {"days_into_quarter": days_in, "reliability": rel}
-
-
-def diagnose_disagreement(growth: Optional[dict], gdp: dict) -> dict:
-    """
-    Automates the manual check: is the composite plausibly LEADING (a real
-    turn GDP hasn't registered yet) or plausibly DRIFTED (stopped tracking)?
-
-    This does not claim certainty -- genuinely cannot, from two numbers on
-    one day -- but it replaces "go check manually" with the three concrete
-    things a manual check would actually look at: which specific series is
-    driving the composite's read, how reliable GDPNow's OWN estimate is
-    right now, and (when history exists) whether this disagreement is new
-    or has persisted across multiple readings.
-    """
-    vb = vote_breakdown(growth)
-    rel = gdpnow_reliability(gdp.get("gdpnow_asof"))
-    out = {"vote_breakdown": vb, "gdpnow_reliability": rel,
-          "persistence": None, "lean": None, "reasons": []}
-
-    if vb["outlier"]:
-        out["reasons"].append(
-            f"The composite is NOT unanimous — {vb['outlier']} is the lone "
-            f"outlier against {len(vb['positive']) or len(vb['negative'])} "
-            f"other series. This disagreement is more likely explained by "
-            f"that one input (sentiment reacting to headlines faster than "
-            f"hard data is the common case) than by the whole composite "
-            f"genuinely leading GDP.")
-        out["lean"] = "check the outlier series first"
-    elif vb["unanimous"]:
-        out["reasons"].append(
-            f"The composite is UNANIMOUS across all {vb['n_series']} series "
-            f"— every input agrees, which is a materially stronger case that "
-            f"this is a real signal GDP hasn't caught up to yet, not one "
-            f"noisy input dragging the read.")
-        out["lean"] = "leans toward the composite leading, not drifting"
-
-    if rel["days_into_quarter"] is not None and rel["days_into_quarter"] < 21:
-        out["reasons"].append(
-            f"GDPNow is only {rel['days_into_quarter']} days into the "
-            f"quarter — its own most-volatile window, before most source "
-            f"data has arrived. Weight this specific disagreement less than "
-            f"you would the same gap later in the quarter.")
-
-    return out
-
-
-def record_reading(store: str = "data/gdp_anchor_history.csv",
-                   composite_direction: Optional[str] = None,
-                   composite_score: Optional[float] = None,
-                   gdp: Optional[dict] = None) -> Optional[dict]:
-    """
-    Persist today's reading via storage_backend (already configured with
-    this repo's GITHUB_TOKEN — reused, not a new write path). Idempotent
-    per day via append_row's dedupe_on=["date"], so a page reload does not
-    create duplicate rows. Never raises: a failed write degrades to "no
-    persistence today", not a broken page.
-    """
-    try:
-        import storage_backend as sb
-    except Exception:
-        return None
-    if not composite_direction or not (gdp or {}).get("gdp_direction"):
-        return None
-    row = {"date": datetime.now().date().isoformat(),
-          "composite_direction": composite_direction,
-          "composite_score": composite_score,
-          "gdpnow": gdp.get("gdpnow"), "gdp_direction": gdp.get("gdp_direction"),
-          "agrees": bool(composite_direction == gdp["gdp_direction"])}
-    try:
-        sb.append_row(store, row, dedupe_on=["date"])
-        return row
-    except Exception as e:
-        print(f"[macro_quadrant] could not persist gdp_anchor reading: {e}")
-        return None
-
-
-def check_persistence(store: str = "data/gdp_anchor_history.csv",
-                      lookback: int = 5) -> dict:
-    """
-    How many of the last `lookback` recorded readings disagreed
-    consecutively, most-recent-first. A single-day disagreement and a
-    5-session-running disagreement are different findings; this is the
-    piece a one-time manual check cannot see at all.
-    """
-    out = {"available": False, "streak": 0, "of": 0, "detail": None}
-    try:
-        import storage_backend as sb
-        df = sb.read_df(store)
-    except Exception:
-        return out
-    if df.empty or "agrees" not in df.columns:
-        return out
-    df = df.sort_values("date", ascending=False).head(lookback)
-    out["available"] = True
-    out["of"] = len(df)
-    streak = 0
-    for _, row in df.iterrows():
-        if str(row.get("agrees")).lower() in ("false", "0"):
-            streak += 1
-        else:
-            break
-    out["streak"] = streak
-    if streak >= 3:
-        out["detail"] = (f"⚠ {streak} of the last {out['of']} recorded readings "
-                         f"disagreed WITH GDPNow, consecutively. A disagreement "
-                         f"that persists across multiple sessions is the "
-                         f"stronger signal that the composite has drifted, not "
-                         f"that it is catching an early turn — a genuine early "
-                         f"turn should converge as GDPNow updates with fresh "
-                         f"data, not stay apart for {streak} readings running.")
-    elif streak >= 1:
-        out["detail"] = (f"{streak} of the last {out['of']} recorded readings "
-                         f"disagreed. Not yet enough to call persistent — "
-                         f"check again after a few more sessions.")
-    else:
-        out["detail"] = "No recent disagreement streak on record."
     return out
 
 
@@ -566,8 +377,7 @@ def classify(growth: Optional[dict] = None,
     return out
 
 
-def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = None,
-          persistence: Optional[dict] = None):
+def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = None):
     """The headline panel. Quadrant first, regime detail underneath."""
     colour = {REFLATION: "#d4913a", GOLDILOCKS_Q: "#5a9e47",
               STAGFLATION_Q: "#e05252", DEFLATION: "#4a8fd4"}.get(q.get("quadrant"), "#6b7280")
@@ -627,30 +437,6 @@ def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = Non
                            f"this dashboard's own composite nowcast.")
         if gdp.get("note"):
             (st.warning if gdp.get("agrees") is False else st.caption)(gdp["note"])
-        if gdp.get("agrees") is False and gdp.get("diagnosis"):
-            diag = gdp["diagnosis"]
-            with st.expander("🔍 Automated check — leading turn, or drifted?",
-                            expanded=True):
-                if diag.get("lean"):
-                    st.markdown(f"**Lean: {diag['lean']}**")
-                for r in diag.get("reasons", []):
-                    st.caption(f"· {r}")
-                vb = diag.get("vote_breakdown", {})
-                if vb.get("n_series"):
-                    parts = []
-                    for v in vb.get("positive", []):
-                        parts.append(f"✅ {v['name']} ({v.get('reading','')})")
-                    for v in vb.get("negative", []):
-                        parts.append(f"🔻 {v['name']} ({v.get('reading','')})")
-                    for v in vb.get("neutral", []):
-                        parts.append(f"○ {v['name']} ({v.get('reading','')})")
-                    st.caption("Per-series: " + " · ".join(parts))
-                if persistence and persistence.get("available"):
-                    st.markdown(f"**Persistence:** {persistence['detail']}")
-                elif persistence is not None:
-                    st.caption("No recorded history yet — this is the first "
-                              "reading. Persistence tracking builds up from "
-                              "here on future visits.")
     elif gdp and gdp.get("missing"):
         st.caption(f"GDP anchor unavailable ({', '.join(gdp['missing'])}) — the "
                    f"composite nowcast is unchecked against realised growth this pass.")
