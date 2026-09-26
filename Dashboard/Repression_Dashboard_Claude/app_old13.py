@@ -1008,35 +1008,27 @@ def main():
     #       guard's own 40.0 block level, while goldilocks was firing here
     #       unguarded.
     #
-    # v4, Sept 2026: the four flags now come from macro_flags.py (shared, all
-    # three repos) — Fed balance sheet from live WALCL, top-20 concentration
-    # from SPY's daily holdings, CAPE from multpl, deficit manual-and-dated.
-    # Each live input falls back to a DATED manual value and says so below
-    # the regime card. They used to be hand-typed here (CAPE 42.0 from
-    # 2026-08-10), and the valuation guard that sets the current regime label
-    # was running on that number with nothing on screen showing its age.
-    import macro_flags as _mflags
+    # Review and update these dates whenever the underlying facts change —
+    # CAPE monthly at minimum, concentration quarterly is sufficient.
+    FED_BS_EXPANDING = True
+    DEFICIT_GT_5PCT_GDP = True
+    CAPE_CURRENT = 42.0                  # multpl.com, 2026-08-10
+    TOP20_CONCENTRATION_PCT = 50.8       # JPMorgan, cited 2026-08-07 review
+    MACRO_FLAGS_REVIEWED = "2026-08-13"
 
     # Adapter bridges this app's 2-arg _fetch_fred_inline(series_id, start_date)
     # to the classifier's expected fetch_fred(series_id, api_key, start_date).
     with tab7:
         def _fred_adapter(series_id, api_key, start_date="2015-01-01"):
             return _fetch_fred_inline(series_id, start_date)
-        _flags = _mflags.get_flags(fetch_fred=_fred_adapter, api_key=fred_key)
         _regime_out = render_regime_section(
             fred_key, fetch_fred=_fred_adapter,
-            **_mflags.classifier_kwargs(_flags),
+            fed_bs_expanding=FED_BS_EXPANDING,
+            deficit_gt_5pct_gdp=DEFICIT_GT_5PCT_GDP,
+            cape=CAPE_CURRENT,
+            top20_concentration_pct=TOP20_CONCENTRATION_PCT,
             vix=_live_vix(), vix_pct_rank=_live_vix_rank(),
         )
-        with st.expander("🧾 Regime inputs the classifier can't fetch itself — source and age",
-                         expanded=bool(_flags["warnings"])):
-            for _line in _mflags.summary_lines(_flags):
-                st.markdown(f"- {_line}")
-            for _w in _flags["warnings"]:
-                st.warning(_w)
-            st.caption("Manual values live in macro_flags.MANUAL (update value AND asof together). "
-                       "CAPE and concentration arm the goldilocks valuation guard; the Fed and "
-                       "deficit flags feed the repression score.")
 
         # ── FOUR-QUADRANT MACRO MAP ─────────────────────────────────────────
         # Rendered ABOVE the 9-regime detail because it answers the prior
