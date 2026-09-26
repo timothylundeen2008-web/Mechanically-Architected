@@ -47,10 +47,6 @@ _REGIME_COLOR = {
     "liquidity_crisis": "#dc2626",
     "stagflation": "#d97706",
     "goldilocks": "#16a34a",
-    # Sept 2026: these three were missing and rendered in the fallback gray.
-    "growth_scare": "#ea580c",
-    "term_premium_repricing": "#b45309",
-    "restrictive_tightening": "#2563eb",
     "neutral": "#6b7280",
 }
 
@@ -325,8 +321,6 @@ def _quadrant_table(active_key):
                      "valuation/concentration in range",
         "term_premium_repricing": "short real +  ·  long real ↑  ·  DOLLAR ↓  "
                                   "·  credit calm — the INVERSE of repression",
-        "restrictive_tightening": "short real +  ·  long real ↑ ≥0.20pp/3mo  ·  "
-                                  "dollar firm  ·  credit calm — ordinary tightening",
         "growth_scare": "growth composite CONTRACTING — independent of the "
                        "real-rate sign",
         "transition_ambiguous": "short real WITHIN ±0.25% band — gauge silent",

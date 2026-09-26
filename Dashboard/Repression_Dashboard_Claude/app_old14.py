@@ -1055,8 +1055,7 @@ def main():
                 cpi_yoy=getattr(_sig, "cpi_yoy", None),
                 cpi_3m_saar=getattr(_sig, "cpi_3m_saar", None),
                 breakeven_10y=getattr(_sig, "breakeven_10y", None),
-                regime_key=((_regime_out or {}).get("regime") or {}).get("key"),
-                cpi_mom_sa=getattr(_sig, "cpi_mom_sa", None))
+                regime_key=((_regime_out or {}).get("regime") or {}).get("key"))
             # Cross-check the composite nowcast against realised GDP + GDPNow.
             # The composite is the AXIS INPUT (real-time); GDP is the ANCHOR
             # (authoritative but quarterly, lagged and revised). A persistent
@@ -1176,7 +1175,6 @@ def main():
                 _confirmed = _reg_key in ("goldilocks", "inflationary_repression",
                                           "hard_repression", "stagflation",
                                           "term_premium_repricing",
-                                          "restrictive_tightening",
                                           "growth_scare", "liquidity_crisis")
                 _conv = {}
                 for tk in _universe:

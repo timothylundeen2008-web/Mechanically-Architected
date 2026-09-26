@@ -143,11 +143,6 @@ REGIME_TO_QUADRANT = {
                                             "not the growth-inflation mix. Lands in reflation when "
                                             "growth holds up, stagflation when it does not. Read the "
                                             "growth axis to decide."),
-    "restrictive_tightening":   (None, "CROSS-CUTTING: policy is leaning against inflation with "
-                                       "real rates rising. Usually a late-Reflation or Stagflation "
-                                       "state that is TRYING to push toward Goldilocks (inflation "
-                                       "falling) — and risks Deflation if it overtightens. Read "
-                                       "both axes; the quadrant tells you which way it is going."),
     "transition_ambiguous":     (None, "No dominant driver — the quadrant read stands on its own "
                                        "and is MORE informative than the regime here."),
     "neutral":                  (None, "Signals mixed."),
@@ -434,8 +429,7 @@ def classify(growth: Optional[dict] = None,
              cpi_yoy: Optional[float] = None,
              cpi_3m_saar: Optional[float] = None,
              breakeven_10y: Optional[float] = None,
-             regime_key: Optional[str] = None,
-             cpi_mom_sa: Optional[float] = None) -> dict:
+             regime_key: Optional[str] = None) -> dict:
     """
     Place the current environment in one of four boxes.
 
@@ -489,23 +483,6 @@ def classify(growth: Optional[dict] = None,
             f"{cpi_yoy:+.2f}% (gap {delta:+.2f}pp). Direction of change, not "
             f"level — 3% falling from 5% is disinflation; 3% rising from 1% "
             f"is reflation.")
-        # v3, Sept 2026: one outlier month can carry the 3-month rate. If the
-        # LATEST month's annualized pace sits on the other side of YoY, the
-        # direction is not established — treat it as flat (ambiguous) rather
-        # than drawing a box from a figure the newest print contradicts.
-        # (2026-09: 3M SAAR +0.18% from a -0.42% June, while August ran
-        # +0.40% ≈ +4.9% annualized.)
-        if cpi_mom_sa is not None and i_dir in ("rising", "falling"):
-            ann1 = ((1 + float(cpi_mom_sa) / 100) ** 12 - 1) * 100
-            if (i_dir == "falling" and ann1 >= cpi_yoy) or (i_dir == "rising" and ann1 <= cpi_yoy):
-                out["evidence"].append(
-                    f"⚠ But the latest month ran {float(cpi_mom_sa):+.2f}% "
-                    f"(≈{ann1:+.1f}% annualized) — the other side of YoY. The "
-                    f"3-month figure is being carried by an earlier month, so "
-                    f"inflation direction is treated as UNRESOLVED until the "
-                    f"next print.")
-                i_dir = "flat"
-                out["inflation_conflict"] = True
     else:
         out["missing"].append("cpi_3m_saar and/or cpi_yoy")
         # Breakeven as a weak fallback — market-implied forward vs trailing
@@ -828,15 +805,6 @@ def selftest() -> dict:
     if hi["confidence"] != "HIGH" or lo["confidence"] != "MODERATE":
         f.append(f"confidence ladder wrong: confirmed={hi['confidence']} unconfirmed={lo['confidence']}")
 
-    # v3 Sept 2026: latest month contradicting the 3-month read -> unresolved.
-    q = classify(G("EXPANDING"), cpi_yoy=3.40, cpi_3m_saar=0.18, cpi_mom_sa=0.396)
-    if q["inflation_axis"]["direction"] != "flat" or q["quadrant"] is not None:
-        f.append(f"hot latest month vs cool 3M must leave inflation unresolved: {q['inflation_axis']}, {q['quadrant']}")
-    q = classify(G("EXPANDING"), cpi_yoy=3.40, cpi_3m_saar=0.18, cpi_mom_sa=0.05)
-    if q["quadrant"] != GOLDILOCKS_Q:
-        f.append(f"cool latest month agreeing with cool 3M must still read Goldilocks: {q['quadrant']}")
-    if REGIME_TO_QUADRANT.get("restrictive_tightening") is None:
-        f.append("restrictive_tightening missing from REGIME_TO_QUADRANT")
     return {"ok": not f, "failures": f}
 
 

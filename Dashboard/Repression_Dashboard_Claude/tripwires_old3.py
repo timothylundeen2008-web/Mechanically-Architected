@@ -307,30 +307,6 @@ def build(sig=None, growth: Optional[dict] = None,
                          if _long_mom and _long_mom > 0 else
                          "No divergence: yields are not rising."))))
 
-    # ── 4d. Restrictive tightening — v6, Sept 2026 ─────────────────────────
-    # The branch fires while DFII10 has risen >= +0.20pp over 3 months with
-    # a positive short real rate, calm credit and a dollar that is not
-    # falling. The nearest exit is the long end simply stopping its climb.
-    if _long_mom is not None:
-        _TIGHT = 0.20
-        tight_on = _long_mom >= _TIGHT
-        out.append(_tw(
-            "Long real yield momentum → tightening branch "
-            + ("clears" if tight_on else "arms"),
-            _long_mom, _TIGHT, abs(_long_mom - _TIGHT),
-            "fall" if tight_on else "rise", HIGH, unit="pp",
-            note=(f"DFII10 3-month change {_long_mom:+.2f}pp vs the "
-                  f"+{_TIGHT:.2f}pp restrictive_tightening threshold. "
-                  + ("While above it (with a positive short real rate, calm "
-                     "credit and a firm dollar) the regime is restrictive "
-                     "tightening: TLT ~2%, front-end cash ~19%. A drop below "
-                     "hands the call back to the goldilocks/transition "
-                     "branch, where the valuation guard decides."
-                     if tight_on else
-                     "A rise above it, with the short real rate positive and "
-                     "the dollar firm, switches the regime to restrictive "
-                     "tightening — cut duration and long-duration growth."))))
-
     # ── 5. Valuation guard — what would UNBLOCK goldilocks ──────────────────
     if cape is not None:
         out.append(_tw(

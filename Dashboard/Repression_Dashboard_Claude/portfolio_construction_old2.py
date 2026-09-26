@@ -109,22 +109,6 @@ REGIME_THESIS = {
                           "what rates are pricing, at which point this "
                           "becomes liquidity_crisis and duration re-arms.",
     },
-    "restrictive_tightening": {
-        "bet": "Real rates rising at both ends with a firm dollar and calm "
-               "credit — money getting more expensive in an orderly way. "
-               "Front-end cash earns a positive real rate; duration and "
-               "long-duration growth lose.",
-        "wrong_if": "The long end stops rising (3-month DFII10 change falls "
-                    "below +0.20pp) or the Fed signals it is done — either "
-                    "returns the read to goldilocks/transition. Wrong in the "
-                    "other direction if the dollar turns down (term premium "
-                    "repricing) or credit cracks (liquidity crisis).",
-        "crash_exposure": "Moderately defensive. TLT cut to ~2% so a "
-                          "deflationary bust is under-hedged until the HY "
-                          "override re-arms duration; the offset is ~19% in "
-                          "front-end cash and a doubled trend sleeve, which "
-                          "is what worked in 2022's rate shock.",
-    },
     "growth_scare": {
         "bet": "Labour and consumer data contracting together, independent of "
                "the real-rate sign.",
