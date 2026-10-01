@@ -125,19 +125,6 @@ REGIME_THESIS = {
                           "front-end cash and a doubled trend sleeve, which "
                           "is what worked in 2022's rate shock.",
     },
-    "credit_stress": {
-        "bet": "High-yield spreads have left the calm zone (>= 3.5%) and are "
-               "widening or already wide (>= 4.5%), short of a liquidity "
-               "crisis. Credit leads equities.",
-        "wrong_if": "HY OAS falls back below 3.5% (calm) or stops widening "
-                    "while sitting below 4.5%; or it escalates past 5% with "
-                    "+0.5pp in two weeks, which makes it liquidity_crisis and "
-                    "re-arms duration.",
-        "crash_exposure": "Moderately defensive: growth and cyclicals trimmed, "
-                          "~+8pts to front-end cash and trend. Duration is "
-                          "neither added nor cut, so a deflationary bust is "
-                          "only partly hedged until the crisis override fires.",
-    },
     "growth_scare": {
         "bet": "Labour and consumer data contracting together, independent of "
                "the real-rate sign.",

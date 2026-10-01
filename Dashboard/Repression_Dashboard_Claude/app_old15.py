@@ -1176,7 +1176,7 @@ def main():
                 _confirmed = _reg_key in ("goldilocks", "inflationary_repression",
                                           "hard_repression", "stagflation",
                                           "term_premium_repricing",
-                                          "restrictive_tightening", "credit_stress",
+                                          "restrictive_tightening",
                                           "growth_scare", "liquidity_crisis")
                 _conv = {}
                 for tk in _universe:

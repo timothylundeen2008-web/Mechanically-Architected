@@ -143,9 +143,6 @@ REGIME_TO_QUADRANT = {
                                             "not the growth-inflation mix. Lands in reflation when "
                                             "growth holds up, stagflation when it does not. Read the "
                                             "growth axis to decide."),
-    "credit_stress":            (None, "CROSS-CUTTING: credit is widening ahead of the growth data. "
-                                       "Usually late-cycle Reflation rolling toward Stagflation or "
-                                       "Deflation; read the growth axis for which."),
     "restrictive_tightening":   (None, "CROSS-CUTTING: policy is leaning against inflation with "
                                        "real rates rising. Usually a late-Reflation or Stagflation "
                                        "state that is TRYING to push toward Goldilocks (inflation "
@@ -838,8 +835,6 @@ def selftest() -> dict:
     q = classify(G("EXPANDING"), cpi_yoy=3.40, cpi_3m_saar=0.18, cpi_mom_sa=0.05)
     if q["quadrant"] != GOLDILOCKS_Q:
         f.append(f"cool latest month agreeing with cool 3M must still read Goldilocks: {q['quadrant']}")
-    if "credit_stress" not in REGIME_TO_QUADRANT:
-        f.append("credit_stress missing from REGIME_TO_QUADRANT")
     if REGIME_TO_QUADRANT.get("restrictive_tightening") is None:
         f.append("restrictive_tightening missing from REGIME_TO_QUADRANT")
     return {"ok": not f, "failures": f}

@@ -51,7 +51,6 @@ _REGIME_COLOR = {
     "growth_scare": "#ea580c",
     "term_premium_repricing": "#b45309",
     "restrictive_tightening": "#2563eb",
-    "credit_stress": "#be123c",
     "neutral": "#6b7280",
 }
 
@@ -236,17 +235,6 @@ def render_regime_section(fred_api_key: str = "",
         f"**Fed reaction function:** `{fed['state']}` — {fed['detail']}"
     )
 
-    # ---- v7: credit cycle / spread-peak re-entry rule ----
-    cc = out.get("credit_cycle") or {}
-    if cc.get("state"):
-        _det = ""
-        if cc.get("peak") is not None and cc.get("mom_2w") is not None:
-            _det = (f" · 6-mo HY high {cc['peak']:.2f}% ({cc.get('peak_date')}), "
-                    f"now {cc['current']:.2f}%, 2-wk {cc['mom_2w']:+.2f}pp")
-        _cc_fn = {"RE_ENTRY": st.success, "RE_ENTRY_PENDING": st.info,
-                  "WIDENING": st.warning, "PEAK_FORMING": st.warning}.get(cc["state"], st.caption)
-        _cc_fn(f"**Credit cycle: {cc['state']}**{_det} — {cc.get('action', '')}")
-
     # ---- Two-real-yield history chart ----
     _real_yield_chart(fred_api_key, kw)
 
@@ -339,8 +327,6 @@ def _quadrant_table(active_key):
                                   "·  credit calm — the INVERSE of repression",
         "restrictive_tightening": "short real +  ·  long real ↑ ≥0.20pp/3mo  ·  "
                                   "dollar firm  ·  credit calm — ordinary tightening",
-        "credit_stress": "HY OAS ≥ 3.5% and (widening ≥ +0.25pp/2wk or ≥ 4.5%)  ·  "
-                         "below the crisis override",
         "growth_scare": "growth composite CONTRACTING — independent of the "
                        "real-rate sign",
         "transition_ambiguous": "short real WITHIN ±0.25% band — gauge silent",
