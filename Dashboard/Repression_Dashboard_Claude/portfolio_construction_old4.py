@@ -133,13 +133,10 @@ REGIME_THESIS = {
                     "while sitting below 4.5%; or it escalates past 5% with "
                     "+0.5pp in two weeks, which makes it liquidity_crisis and "
                     "re-arms duration.",
-        "crash_exposure": "Strictly more defensive than restrictive_tightening "
-                          "while real yields rise: growth tech ~17%, cash ~24%, "
-                          "trend ~9%, TLT held at ~2% (the 2022 pattern — rates "
-                          "and credit tightening together). Duration returns "
-                          "only when real yields turn down, and only through "
-                          "the entry gate, so a deflationary bust is partly "
-                          "hedged until then.",
+        "crash_exposure": "Moderately defensive: growth and cyclicals trimmed, "
+                          "~+8pts to front-end cash and trend. Duration is "
+                          "neither added nor cut, so a deflationary bust is "
+                          "only partly hedged until the crisis override fires.",
     },
     "growth_scare": {
         "bet": "Labour and consumer data contracting together, independent of "
