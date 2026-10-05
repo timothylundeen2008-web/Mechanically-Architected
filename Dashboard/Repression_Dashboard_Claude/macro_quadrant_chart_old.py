@@ -40,8 +40,7 @@ def _norm(v, span):
 
 
 def build(quadrant, growth_score, inflation_delta_pp, confidence,
-         gdp_direction=None, size=440, inflation_unresolved=False,
-         inflation_delta_1m_pp=None):
+         gdp_direction=None, size=440):
     """
     quadrant            one of REFLATION/GOLDILOCKS_Q/STAGFLATION_Q/DEFLATION,
                         or None if the axes disagree on a box
@@ -50,13 +49,6 @@ def build(quadrant, growth_score, inflation_delta_pp, confidence,
     confidence          "HIGH" / "MODERATE" / "LOW"
     gdp_direction       "rising" / "flat" / "falling" / None -- the GDP
                         anchor's own read, plotted as a secondary marker
-    inflation_unresolved  True when macro_quadrant overrode the inflation
-                        direction to flat because the latest month contradicts
-                        the 3-month rate. The dot then sits ON the centre line
-                        (matching the label), and a horizontal bar spans the
-                        two disagreeing readings instead of the chart silently
-                        plotting one of them.
-    inflation_delta_1m_pp  latest month annualized minus YoY (the bar's other end)
     """
     pad = 46
     cx = size // 2
@@ -64,13 +56,7 @@ def build(quadrant, growth_score, inflation_delta_pp, confidence,
     plot = size - 2 * pad
     half = plot / 2.0
 
-    x_raw = _norm(inflation_delta_pp, CHART_X_RANGE)
-    # Oct 2026 FIX: the label said "flat" (unresolved) while the dot was drawn
-    # from the raw 3-month gap — e.g. -3.22pp put it 80% of the way into the
-    # "falling" half. The dot must match the label: centre it, and show the
-    # disagreement as a range bar rather than picking one side.
-    x = 0.0 if (inflation_unresolved and x_raw is not None) else x_raw
-    x_1m = _norm(inflation_delta_1m_pp, CHART_X_RANGE)
+    x = _norm(inflation_delta_pp, CHART_X_RANGE)
     y = _norm(growth_score, CHART_Y_RANGE)
 
     def px(nx):
@@ -123,23 +109,6 @@ def build(quadrant, growth_score, inflation_delta_pp, confidence,
                  f'font-size="12" font-weight="700">DEFLATION</text>')
     parts.append(f'<text x="{cx+8}" y="{cy+half-10}" fill="{QCOLOR[STAGFLATION_Q]}" '
                  f'font-size="12" font-weight="700">STAGFLATION</text>')
-
-    # Unresolved inflation: range bar between the two disagreeing readings
-    if inflation_unresolved and x_raw is not None and y is not None:
-        ends = [x_raw] + ([x_1m] if x_1m is not None else [])
-        lo, hi = min(ends + [0.0]), max(ends + [0.0])
-        by = py(y)
-        parts.append(f'<line x1="{px(lo):.1f}" y1="{by:.1f}" x2="{px(hi):.1f}" y2="{by:.1f}" '
-                     f'stroke="#9aa3b2" stroke-width="2" stroke-dasharray="4,3" opacity="0.8"/>')
-        for e, lab in ((x_raw, "3M"), (x_1m, "latest")):
-            if e is None:
-                continue
-            ex = px(e)
-            parts.append(f'<line x1="{ex:.1f}" y1="{by-6:.1f}" x2="{ex:.1f}" y2="{by+6:.1f}" '
-                         f'stroke="#9aa3b2" stroke-width="2"/>')
-            # labels BELOW the bar: the axis captions sit just above the centre line
-            parts.append(f'<text x="{ex:.1f}" y="{by+18:.1f}" fill="#9aa3b2" font-size="9" '
-                         f'text-anchor="middle">{lab}</text>')
 
     # Main dot -- or, if data is missing, say so ON the chart
     if x is not None and y is not None:
@@ -194,24 +163,6 @@ def selftest():
     ys = [float(m) for m in re.findall(r'cy="([\d.]+)"', svg3)]
     if any(v < 0 or v > 440 for v in xs + ys):
         f.append(f"extreme input produced an out-of-bounds coordinate: x={xs} y={ys}")
-
-    # Oct 2026: an UNRESOLVED inflation axis must plot the dot on the centre
-    # line (matching the "flat/unresolved" label), never at the raw 3M gap,
-    # and must draw the range bar with both ends labelled.
-    svg4 = build(None, growth_score=0, inflation_delta_pp=-3.22, confidence="LOW",
-                 gdp_direction="rising", inflation_unresolved=True, inflation_delta_1m_pp=1.51)
-    dots = [float(m) for m in re.findall(r'<circle cx="([\d.]+)"', svg4)]
-    centre = 440 // 2
-    if not dots or any(abs(d - centre) > 0.5 for d in dots):
-        f.append(f"unresolved inflation must centre the dot and GDP ring: {dots}")
-    if "3M" not in svg4 or "latest" not in svg4:
-        f.append("unresolved inflation must draw the labelled range bar")
-    svg5 = build(DEFLATION, growth_score=-2, inflation_delta_pp=-3.22, confidence="MODERATE")
-    d5 = [float(m) for m in re.findall(r'<circle cx="([\d.]+)"', svg5)]
-    if not d5 or d5[0] >= centre:
-        f.append("a RESOLVED falling inflation read must still plot left of centre")
-    if "latest" in svg5:
-        f.append("no range bar when inflation is resolved")
 
     return {"ok": not f, "failures": f}
 

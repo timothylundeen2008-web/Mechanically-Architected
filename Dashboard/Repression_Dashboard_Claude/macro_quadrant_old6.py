@@ -509,7 +509,6 @@ def classify(growth: Optional[dict] = None,
                     f"next print.")
                 i_dir = "flat"
                 out["inflation_conflict"] = True
-                out["inflation_delta_1m_pp"] = round(ann1 - cpi_yoy, 2)
     else:
         out["missing"].append("cpi_3m_saar and/or cpi_yoy")
         # Breakeven as a weak fallback — market-implied forward vs trailing
@@ -524,11 +523,7 @@ def classify(growth: Optional[dict] = None,
               else None)
     out["inflation_axis"] = {"direction": i_dir, "cpi_yoy": cpi_yoy,
                              "cpi_3m_saar": cpi_3m_saar, "delta_pp": _delta,
-                             "breakeven_10y": breakeven_10y,
-                             # Oct 2026: flat-because-the-reads-CONFLICT is a
-                             # different statement from flat-because-steady.
-                             "unresolved": bool(out.get("inflation_conflict")),
-                             "delta_1m_pp": out.get("inflation_delta_1m_pp")}
+                             "breakeven_10y": breakeven_10y}
 
     # ── Place in a box ──────────────────────────────────────────────────────
     # v2 FIX: "flat" must NEVER be bundled with a directional neighbour on
@@ -554,12 +549,10 @@ def classify(growth: Optional[dict] = None,
         q = DEFLATION
     elif g_dir == "flat" or i_dir == "flat":
         q = None
-        _which = "Growth is flat" if g_dir == "flat" else (
-            "Inflation is unresolved (3-month and latest-month reads disagree)"
-            if out.get("inflation_conflict") else "Inflation is flat")
         out["evidence"].append(
-            f"{_which} — genuinely ambiguous which box this belongs to, not "
-            f"forced into either neighbour. The dot's position reflects this "
+            f"{'Growth' if g_dir=='flat' else 'Inflation'} is flat — "
+            f"genuinely ambiguous which box this belongs to, not forced "
+            f"into either neighbour. The dot's position reflects this "
             f"directly rather than the label overclaiming a side.")
     else:
         q = None
@@ -620,25 +613,18 @@ def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = Non
 
     try:
         import macro_quadrant_chart as _chart
-        _ia = q["inflation_axis"]
         _svg = _chart.build(
             quadrant=q.get("quadrant"),
             growth_score=q["growth_axis"].get("score"),
-            inflation_delta_pp=_ia.get("delta_pp"),
+            inflation_delta_pp=q["inflation_axis"].get("delta_pp"),
             confidence=q["confidence"],
-            gdp_direction=(gdp or {}).get("gdp_direction"),
-            inflation_unresolved=_ia.get("unresolved", False),
-            inflation_delta_1m_pp=_ia.get("delta_1m_pp"))
+            gdp_direction=(gdp or {}).get("gdp_direction"))
         st.markdown(_svg, unsafe_allow_html=True)
         st.caption("Solid dot: current reading (size/opacity = confidence). "
                    "Dashed ring: where GDPNow/realised GDP alone would place "
                    "the growth axis, at the same inflation reading — a gap "
                    "between the two is the composite and its anchor "
-                   "disagreeing, visibly."
-                   + (" Horizontal bar: inflation is unresolved, so the dot sits "
-                      "on the centre line and the bar spans the two readings that "
-                      "disagree — the 3-month rate (left end, decelerating) and "
-                      "the latest month (right end)." if _ia.get("unresolved") else ""))
+                   "disagreeing, visibly.")
     except Exception as _e:
         st.caption(f"Chart unavailable: {_e}")
 
@@ -649,13 +635,9 @@ def render(st, q: dict, show_detail_link: bool = True, gdp: Optional[dict] = Non
         st.caption(f"{ga['state'] or 'no composite'}"
                    + (" · confirmed" if ga.get("confirmed") else " · unconfirmed"))
     with c2:
-        _idir = ("unresolved — 3-month and latest month disagree"
-                 if ia.get("unresolved") else (ia['direction'] or 'unknown'))
-        st.markdown(f"**Inflation axis:** {_idir}")
+        st.markdown(f"**Inflation axis:** {ia['direction'] or 'unknown'}")
         if ia.get("cpi_3m_saar") is not None and ia.get("cpi_yoy") is not None:
-            st.caption(f"3M SAAR {ia['cpi_3m_saar']:+.2f}% vs YoY {ia['cpi_yoy']:+.2f}%"
-                       + (f" · latest month ≈ {ia['cpi_yoy'] + ia['delta_1m_pp']:+.1f}% annualized"
-                          if ia.get("unresolved") and ia.get("delta_1m_pp") is not None else ""))
+            st.caption(f"3M SAAR {ia['cpi_3m_saar']:+.2f}% vs YoY {ia['cpi_yoy']:+.2f}%")
 
     # ── GDP anchor: is the nowcast proxy still tracking what it proxies? ────
     if gdp and (gdp.get("realised") is not None or gdp.get("gdpnow") is not None):
@@ -853,12 +835,6 @@ def selftest() -> dict:
     q = classify(G("EXPANDING"), cpi_yoy=3.40, cpi_3m_saar=0.18, cpi_mom_sa=0.396)
     if q["inflation_axis"]["direction"] != "flat" or q["quadrant"] is not None:
         f.append(f"hot latest month vs cool 3M must leave inflation unresolved: {q['inflation_axis']}, {q['quadrant']}")
-    q = classify(G("EXPANDING"), cpi_yoy=3.40, cpi_3m_saar=0.18, cpi_mom_sa=0.396)
-    ia = q["inflation_axis"]
-    if not ia.get("unresolved") or ia.get("delta_1m_pp") is None or abs(ia["delta_1m_pp"] - 1.47) > 0.1:
-        f.append(f"a conflicting latest month must mark the axis UNRESOLVED with its own gap: {ia}")
-    if not any("unresolved" in e for e in q["evidence"]):
-        f.append("evidence must say 'unresolved', not 'flat', when the reads conflict")
     q = classify(G("EXPANDING"), cpi_yoy=3.40, cpi_3m_saar=0.18, cpi_mom_sa=0.05)
     if q["quadrant"] != GOLDILOCKS_Q:
         f.append(f"cool latest month agreeing with cool 3M must still read Goldilocks: {q['quadrant']}")
