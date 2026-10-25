@@ -63,7 +63,17 @@ def publish(regime: dict, repression: Optional[dict] = None,
 
     Everything optional — a partial publish with named gaps beats no publish
     at all, and consumers check per-field rather than assuming completeness.
+
+    v1.1 (Oct 2026): a regime read made during a DATA FAILURE (the classifier
+    held the prior regime because core FRED inputs were missing) is NOT
+    published. Overwriting a good summary with an outage read would make
+    All-Weather and Money Flow consume it as fresh. Skipping lets the last
+    good summary age visibly instead -- the readers already flag staleness.
     """
+    if (regime or {}).get("data_failure"):
+        return {"ok": False, "durable": False, "skipped": True,
+                "regime": (regime or {}).get("key"),
+                "reason": "data failure — core regime inputs missing; last good summary kept"}
     payload = {
         "published_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "notes": notes,
