@@ -1,6 +1,13 @@
 """
-convexity_sleeve.py  (v1 — August 2026)
-───────────────────────────────────────
+convexity_sleeve.py  (v1.1 — October 2026)
+──────────────────────────────────────────
+v1.1 (2026-10-31): the Convexity Sleeve tab honours the policy switch
+  risk_budget.CONVEXITY_FUNDED. When the budget comes back funded=False it
+  shows NOT FUNDED, the reason and the evidence, and what the designed
+  schedule would spend for reference, and builds no structure. Funded
+  behaviour is unchanged. design(), pricing and the harvest ladder are
+  untouched (the Portfolio-Tracker hedge lab copies _bs_put_approx).
+
 The tail hedge: from a dollar budget to an executable, rule-based position.
 
 WHAT WAS ALREADY BUILT vs WHAT THIS ADDS
@@ -298,6 +305,41 @@ def render(st, plan: dict, budget_info: dict, nav: float):
 
     q = budget_info.get("quartile")
     pct = budget_info.get("pct_of_nav")
+
+    # v1.1: the sleeve is not funded by policy (risk_budget.CONVEXITY_FUNDED).
+    # Say so plainly and stop: no structure, no payoff table, nothing that
+    # reads as an instruction to buy.
+    if budget_info.get("funded") is False:
+        dp = budget_info.get("designed_pct")
+        st.info("**Convexity sleeve: NOT FUNDED (policy decision 2026-10-31).** "
+                "The model portfolio holds no index puts. Its crash control is "
+                "the −8% circuit breaker.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Funded", "No")
+        c2.metric("Spend", "$0 (0.00% of NAV)")
+        c3.metric("Designed schedule would spend",
+                  f"{dp:.2f}% of NAV" + (f" (Q{q})" if q else "") if dp is not None else "n/a",
+                  help="What risk_budget's VIX-quartile schedule would spend now, "
+                       "shown for reference only.")
+        st.caption(budget_info.get("detail", ""))
+        with st.expander("Why not funded — the evidence"):
+            st.markdown(
+                "Hedge lab, Portfolio-Tracker `logs/hedge_lab/` (real prices "
+                "2005–2026, today's book, puts priced with this module's "
+                "Black-Scholes and skew markup, 3% trading cost):\n\n"
+                "- **This schedule** (~4% of NAV a year on average) cut the "
+                "worst drawdown from −20% to −15%, but cost about 0.6 points of "
+                "return a year.\n"
+                "- **A 1%-a-year sleeve** looked like +0.7 points a year at the "
+                "−8% breaker line, but lost return with the line at −7% and −9%: "
+                "the gain came from where the line sits, not from the puts.\n"
+                "- **In a 2000-style grinding bear** no sleeve helped: rolled "
+                "puts decay and rarely reach the harvest multiples.\n\n"
+                "To revisit: set `CONVEXITY_FUNDED = True` in `risk_budget.py` "
+                "(both repos) and update `risk_policy.md` §6. Real option-price "
+                "history would make the test far more reliable.")
+        return
+
     c1, c2, c3 = st.columns(3)
     c1.metric("VIX quartile", f"Q{q}" if q else "n/a",
               help="Q1 = cheapest quartile of VIX's own year. The budget "
@@ -436,6 +478,44 @@ def selftest() -> dict:
         failures.append("harvest ladder + tail does not sum to 100%")
     if abs(sum(x[1] for x in PROCEEDS_DESTINATION) - 1.0) > 1e-9:
         failures.append("proceeds destinations do not sum to 100%")
+
+    # v1.1: render honours the funding switch. A recording stand-in for
+    # Streamlit captures what the tab would draw.
+    class _Rec:
+        def __init__(self):
+            self.calls = []
+
+        def __getattr__(self, name):
+            def f(*a, **k):
+                self.calls.append((name, " ".join(str(x) for x in a)))
+                if name == "columns":
+                    return [self] * (a[0] if a and isinstance(a[0], int) else 3)
+                return self
+            return f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    nf = _Rec()
+    render(nf, plan_spy, {"funded": False, "pct_of_nav": 0.0, "designed_pct": 1.25,
+                          "quartile": 2, "detail": "Not funded — test"}, 400_000)
+    names = [c[0] for c in nf.calls]
+    texts = " ".join(str(c[1]) for c in nf.calls)
+    if "NOT FUNDED" not in texts or "code" in names or "dataframe" in names:
+        failures.append("not-funded tab must say NOT FUNDED and build no structure or payoff table")
+    if "1.25% of NAV (Q2)" not in texts:
+        failures.append("not-funded tab must show the designed schedule for reference")
+    fd = _Rec()
+    render(fd, plan_spy, {"funded": True, "pct_of_nav": 1.25, "quartile": 2, "detail": "Q2"}, 400_000)
+    if "code" not in [c[0] for c in fd.calls] or "NOT FUNDED" in " ".join(str(c[1]) for c in fd.calls):
+        failures.append("funded tab must render the structure as in v1")
+    old = _Rec()   # a v1 budget dict (no 'funded' key) behaves as funded
+    render(old, plan_spy, {"pct_of_nav": 1.25, "quartile": 2, "detail": "Q2"}, 400_000)
+    if "code" not in [c[0] for c in old.calls]:
+        failures.append("a budget without the funded flag must render as funded")
 
     return {"ok": not failures, "failures": failures,
             "spy_contracts": plan_spy.get("contracts"),
