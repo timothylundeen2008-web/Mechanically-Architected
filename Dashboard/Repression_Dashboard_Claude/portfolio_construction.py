@@ -182,7 +182,7 @@ def build(regime_key: str, weights: dict, base_weights: dict,
     thesis and its invalidation.
     """
     tilt = {t: round(weights.get(t, 0) - base_weights.get(t, 0), 1)
-            for t in base_weights}
+            for t in set(base_weights) | set(weights)}   # incl. sleeves with no base weight (DBMF, SCHP)
     active_tilt = {t: v for t, v in tilt.items() if abs(v) >= 0.5}
 
     core_total = sum(weights.get(t, 0) for t in CORE_SLEEVES)
